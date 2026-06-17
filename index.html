@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>SRDF-OS</title>
+
+<!-- PWA / Apple-Geräte-Anpassung -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050507">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SRDF-OS">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+  <!-- Login / Lock-Screen -->
+  <div id="lock"></div>
+
+  <!-- Hauptansicht (nur sichtbar nach Login) -->
+  <div id="main" style="display:none;height:100%;display:none;flex-direction:column">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title" id="topbarTitle">Übersicht</div>
+        <div class="topbar-sub" id="topbarSub">Alles im Blick</div>
+      </div>
+      <div class="status-ring" id="statusRing" title="Hintergrund-Aktivität">
+        <div class="status-ring-dot"></div>
+      </div>
+    </div>
+
+    <div id="view"></div>
+
+    <div class="tabbar glass" id="tabbar"></div>
+  </div>
+</div>
+
+<div id="toast" class="glass glass-strong"></div>
+<div class="sheet-overlay" id="sheetOverlay">
+  <div class="sheet glass glass-strong" id="sheetContent"></div>
+</div>
+
+<script src="app.js"></script>
+<script src="views-dashboard.js"></script>
+<script src="views-shopify.js"></script>
+<script src="views-social.js"></script>
+<script src="views-ai.js"></script>
+<script src="views-settings.js"></script>
+</body>
+</html>

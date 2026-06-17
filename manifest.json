@@ -1,0 +1,16 @@
+{
+  "name": "SRDF-OS — Dein Business-Cockpit",
+  "short_name": "SRDF-OS",
+  "description": "Echtes Business-Cockpit: Shopify, Social Media und KI an einem Ort — vollständig unter deiner Kontrolle.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#050507",
+  "theme_color": "#050507",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
