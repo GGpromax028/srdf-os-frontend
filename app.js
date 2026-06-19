@@ -6,12 +6,10 @@
 // hier lokal gehalten, alles andere kommt live vom Server.
 
 const API_BASE = (() => {
-  // Lokal entwickeln: Backend läuft typischerweise auf Port 3000.
-  // Sobald du das Backend live hostest (Render/Railway), hier die
-  // echte URL eintragen, z.B. 'https://dein-backend.up.railway.app/api'
   const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
-  return isLocal ? 'http://localhost:3000/api' : '/api';
+  return isLocal ? 'http://localhost:3000/api' : 'https://srdf-os-backend-production.up.railway.app/api';
 })();
+
 
 const state = {
   token: null,
