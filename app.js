@@ -129,6 +129,7 @@ function logout() {
   state.token = null;
   sessionStorage.removeItem('srdf_token');
   document.getElementById('main').style.display = 'none';
+  document.getElementById('lock').style.display = 'flex';
   renderLock();
 }
 
@@ -234,7 +235,9 @@ function renderLogin(lock) {
 }
 
 async function showMain() {
-  document.getElementById('lock').innerHTML = '';
+  const lockEl = document.getElementById('lock');
+  lockEl.innerHTML = '';
+  lockEl.style.display = 'none';
   document.getElementById('main').style.display = 'flex';
   await loadGlobalStatus();
   renderTabbar();
