@@ -280,18 +280,20 @@ async function showMain() {
 
 async function loadGlobalStatus() {
   try {
-    const [perms, social, aiStatus, shopifyStatus, igStatus] = await Promise.all([
+    const [perms, social, aiStatus, shopifyStatus, igStatus, higgsfieldStatus] = await Promise.all([
       api('/settings/permissions'),
       api('/social/accounts'),
       api('/ai/status'),
       api('/shopify/status'),
       api('/social/instagram/status'),
+      api('/higgsfield/status'),
     ]);
     state.permissions = perms;
     state.socialAccounts = social;
     state.aiConfigured = aiStatus.configured;
     state.shopifyConfigured = shopifyStatus.configured;
     state.instagramConfigured = igStatus.configured;
+    state.higgsfieldConfigured = higgsfieldStatus.configured;
   } catch (err) {
     toast('Status konnte nicht geladen werden', err.message, 'error');
   }
