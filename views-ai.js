@@ -319,4 +319,16 @@ async function openVideoGenerationSheet() {
       try {
         const result = await api('/higgsfield/generate-video', {
           method: 'POST',
-          body: { product
+          body: { productTitle: product.title, productImageUrl: product.imageUrl, prompt, platform },
+        });
+        closeSheet();
+        toast('Video erstellt', 'Liegt jetzt als Entwurf im Social-Tab — dort gibst du es frei.', 'success');
+        navigateTo('ai');
+      } catch (err) {
+        toast('Video-Generierung fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Video generieren';
+      }
+    });
+  };
+}
