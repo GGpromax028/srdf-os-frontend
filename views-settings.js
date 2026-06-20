@@ -27,6 +27,7 @@ async function renderSettings(view) {
     <div class="glass">
       <div class="row"><div class="row-icon">◫</div><div class="row-text"><div class="row-title">Shopify</div></div>${statusBadgeFor(state.shopifyConfigured)}</div>
       <div class="row"><div class="row-icon">✦</div><div class="row-text"><div class="row-title">Claude-KI</div></div>${statusBadgeFor(state.aiConfigured)}</div>
+      <div class="row"><div class="row-icon">▶</div><div class="row-text"><div class="row-title">Higgsfield (Video)</div></div>${statusBadgeFor(state.higgsfieldConfigured)}</div>
       <div class="row"><div class="row-icon">◈</div><div class="row-text"><div class="row-title">Instagram</div></div>${statusBadgeFor(state.instagramConfigured)}</div>
     </div>
   `;
