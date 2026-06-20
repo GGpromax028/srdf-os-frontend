@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════
 // Service Worker · macht die App installierbar + grundlegend offline-fähig
 // ═══════════════════════════════════════════════════════════
-const CACHE_NAME = 'srdf-os-v1';
+const CACHE_NAME = 'srdf-os-v1.1';
 const SHELL_FILES = ['./index.html', './manifest.json', './app.js', './styles.css'];
 
 self.addEventListener('install', (event) => {
