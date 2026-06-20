@@ -10,7 +10,6 @@ const API_BASE = (() => {
   return isLocal ? 'http://localhost:3000/api' : 'https://srdf-os-backend-production.up.railway.app/api';
 })();
 
-
 const state = {
   token: null,
   tab: 'dashboard',
@@ -22,6 +21,15 @@ const state = {
   backgroundActive: false,
 };
 
+// ── Hilfsfunktion: fetch mit Timeout ──
+// Verhindert, dass die App ewig "hängt", falls Railway gerade aus dem
+// Ruhezustand aufwacht oder die Verbindung komplett tot ist.
+function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 // ── API-Client ──
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'Content-Type': 'application/json' };
@@ -29,13 +37,21 @@ async function api(path, { method = 'GET', body } = {}) {
 
   let res;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await fetchWithTimeout(`${API_BASE}${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
-    });
+    }, 15000);
   } catch (err) {
-    throw new Error('Backend nicht erreichbar. Läuft der Server? (npm start im backend-Ordner)');
+    const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+    if (err.name === 'AbortError') {
+      throw new Error('Server antwortet nicht. Falls er gerade "aufgewacht" ist (nach Inaktivität), versuch es in 10–15 Sekunden nochmal.');
+    }
+    throw new Error(
+      isLocal
+        ? 'Backend nicht erreichbar. Läuft der Server lokal? (npm start im backend-Ordner)'
+        : 'Backend nicht erreichbar. Prüfe, ob der Server bei Railway noch läuft (Railway-Dashboard → Deployments).'
+    );
   }
 
   const isJson = res.headers.get('content-type')?.includes('application/json');
@@ -43,7 +59,6 @@ async function api(path, { method = 'GET', body } = {}) {
 
   if (!res.ok) {
     if (res.status === 401) {
-      // Session abgelaufen -> zurück zum Lock-Screen, nichts kaschieren
       logout();
     }
     throw new Error(data?.error || `Fehler ${res.status}`);
@@ -99,7 +114,6 @@ function popBackgroundTask() {
     document.getElementById('statusRing').classList.remove('active');
   }
 }
-// Hilfsfunktion: läuft async fn, zeigt währenddessen den Ring aktiv
 async function withActivity(fn) {
   pushBackgroundTask();
   try { return await fn(); }
@@ -113,7 +127,6 @@ async function initAuth() {
   const saved = sessionStorage.getItem('srdf_token');
   if (saved) {
     state.token = saved;
-    // Token könnte abgelaufen sein — leiser Test, kein Vorab-Vertrauen
     try {
       await api('/settings/permissions');
       return showMain();
@@ -139,7 +152,7 @@ async function renderLock() {
 
   let status;
   let attempt = 0;
-  const maxAttempts = 4; // Railway kann nach Inaktivität ein paar Sekunden zum Aufwachen brauchen
+  const maxAttempts = 4;
 
   while (attempt < maxAttempts) {
     if (attempt > 0) {
@@ -169,14 +182,6 @@ async function renderLock() {
       await new Promise((r) => setTimeout(r, 1200 * attempt));
     }
   }
-
-  if (!status.configured) {
-    renderSetup(lock);
-  } else {
-    renderLogin(lock);
-  }
-}
-
 
   if (!status.configured) {
     renderSetup(lock);
