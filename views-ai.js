@@ -36,6 +36,11 @@ async function renderAi(view) {
       <span class="card-icon">◉</span>
       <div class="card-title">Verkaufsanalyse</div>
       <div class="card-sub">KI analysiert deine echten Shopify-Daten und gibt konkrete nächste Schritte</div>
+    </div>
+    <div class="card glass" id="genTrendsCard" style="margin-bottom:14px">
+      <span class="card-icon">📈</span>
+      <div class="card-title">Trend-Recherche</div>
+      <div class="card-sub">Echte Websuche: was ist aktuell gefragt? Mit Quellenangaben</div>
     </div>`}
 
     ${!state.higgsfieldConfigured ? `
@@ -60,6 +65,7 @@ async function renderAi(view) {
     document.getElementById('genDescCard').onclick = openDescriptionSheet;
     document.getElementById('genCaptionCard').onclick = openCaptionSheet;
     document.getElementById('genAnalysisCard').onclick = runSalesAnalysis;
+    document.getElementById('genTrendsCard').onclick = openTrendResearchSheet;
   }
   if (state.higgsfieldConfigured) {
     document.getElementById('genVideoCard').onclick = openVideoGenerationSheet;
@@ -90,14 +96,27 @@ function renderAiHistory(history) {
 }
 
 function kindLabel(kind) {
-  return { product_description: 'Produktbeschreibung', caption: 'Social-Caption', sales_analysis: 'Verkaufsanalyse' }[kind] || kind;
+  return {
+    product_description: 'Produktbeschreibung',
+    caption: 'Social-Caption',
+    sales_analysis: 'Verkaufsanalyse',
+    trend_research: 'Trend-Recherche',
+  }[kind] || kind;
 }
 
 function showGenerationDetail(item) {
+  const sourcesHtml = (item.sources && item.sources.length > 0)
+    ? `<div style="margin-bottom:16px">
+        <div style="font-size:11px;color:var(--ink-dim);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Quellen</div>
+        ${item.sources.map(url => `<a href="${escapeHtml(url)}" target="_blank" style="display:block;font-size:11.5px;color:var(--depth-blue);margin-bottom:4px;word-break:break-all">${escapeHtml(url)}</a>`).join('')}
+      </div>`
+    : '';
+
   openSheet(`
     <div class="sheet-title">${escapeHtml(kindLabel(item.kind))}</div>
     <div class="sheet-sub">${item.approved ? 'Bereits freigegeben' : 'Noch nicht freigegeben'}</div>
     <div class="glass" style="padding:16px;margin-bottom:16px;font-size:13.5px;line-height:1.6;white-space:pre-wrap">${escapeHtml(item.output)}</div>
+    ${sourcesHtml}
     ${!item.approved ? `<button class="btn btn-primary btn-full" id="approveBtn">Als final markieren</button>` : ''}
   `);
   if (!item.approved) {
@@ -193,6 +212,55 @@ async function runSalesAnalysis() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// TREND-RECHERCHE · Echte Websuche über Claude
+// ═══════════════════════════════════════════════════════════
+function openTrendResearchSheet() {
+  openSheet(`
+    <div class="sheet-title">Trend-Recherche</div>
+    <div class="sheet-sub">Echte Websuche über Claude — findet aktuelle Produkttrends, mit Quellen zum Nachprüfen. Kostet zusätzlich zu Text-Tokens auch pro Suche.</div>
+    <div class="field">
+      <label class="field-label">Nische (optional)</label>
+      <input class="input" id="trendNiche" placeholder="z.B. Fitness, Haustierzubehör, Beauty...">
+    </div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label">Region</label>
+      <input class="input" id="trendRegion" value="Deutschland">
+    </div>
+    <button class="btn btn-primary btn-full" id="trendGenBtn">Recherche starten</button>
+    <div style="font-size:11px;color:var(--ink-dim);margin-top:10px;text-align:center">Hinweis: Websuche muss zusätzlich in deiner Anthropic Console aktiviert sein.</div>
+  `);
+
+  document.getElementById('trendGenBtn').onclick = async () => {
+    const niche = document.getElementById('trendNiche').value.trim();
+    const region = document.getElementById('trendRegion').value.trim() || 'Deutschland';
+
+    const btn = document.getElementById('trendGenBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Recherchiert…';
+
+    await withActivity(async () => {
+      try {
+        const result = await api('/ai/research-trends', { method: 'POST', body: { niche, region } });
+        closeSheet();
+        toast('Recherche fertig', '', 'success');
+        navigateTo('ai');
+        setTimeout(() => showGenerationDetail({
+          kind: 'trend_research',
+          output: result.text,
+          sources: result.sources,
+          approved: false,
+          id: null,
+        }), 200);
+      } catch (err) {
+        toast('Recherche fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Recherche starten';
+      }
+    });
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
 // HIGGSFIELD · Marketing-Video aus echtem Shopify-Produktbild
 // ═══════════════════════════════════════════════════════════
 function extractFirstImageUrl(product) {
@@ -251,16 +319,4 @@ async function openVideoGenerationSheet() {
       try {
         const result = await api('/higgsfield/generate-video', {
           method: 'POST',
-          body: { productTitle: product.title, productImageUrl: product.imageUrl, prompt, platform },
-        });
-        closeSheet();
-        toast('Video erstellt', 'Liegt jetzt als Entwurf im Social-Tab — dort gibst du es frei.', 'success');
-        navigateTo('ai');
-      } catch (err) {
-        toast('Video-Generierung fehlgeschlagen', err.message, 'error');
-        btn.disabled = false;
-        btn.textContent = 'Video generieren';
-      }
-    });
-  };
-}
+          body: { product
