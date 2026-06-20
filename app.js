@@ -135,19 +135,48 @@ function logout() {
 
 async function renderLock() {
   const lock = document.getElementById('lock');
+  lock.style.display = 'flex';
+
   let status;
-  try {
-    status = await api('/auth/status');
-  } catch (err) {
-    lock.innerHTML = `
-      <div class="lock-icon">⚠</div>
-      <div class="lock-title">Backend nicht erreichbar</div>
-      <div class="lock-card glass" style="text-align:center;color:var(--ink-dim);font-size:13px;line-height:1.6">
-        Stelle sicher, dass das Backend läuft.<br><br>
-        <span style="font-family:var(--font-mono);font-size:12px">cd backend && npm start</span>
-      </div>`;
-    return;
+  let attempt = 0;
+  const maxAttempts = 4; // Railway kann nach Inaktivität ein paar Sekunden zum Aufwachen brauchen
+
+  while (attempt < maxAttempts) {
+    if (attempt > 0) {
+      lock.innerHTML = `
+        <div class="lock-icon"><div class="spinner" style="border-top-color:#1a1000"></div></div>
+        <div class="lock-title">Verbinde…</div>
+        <div style="color:var(--ink-dim);font-size:13px;text-align:center">Server startet, einen Moment.</div>`;
+    }
+    try {
+      status = await api('/auth/status');
+      break;
+    } catch (err) {
+      attempt++;
+      if (attempt >= maxAttempts) {
+        const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+        lock.innerHTML = `
+          <div class="lock-icon">⚠</div>
+          <div class="lock-title">Server antwortet nicht</div>
+          <div class="lock-card glass" style="text-align:center;color:var(--ink-dim);font-size:13px;line-height:1.6">
+            ${escapeHtml(err.message)}
+            ${isLocal ? `<br><br><span style="font-family:var(--font-mono);font-size:12px">cd backend && npm start</span>` : ''}
+          </div>
+          <button class="btn btn-primary" id="retryConnectBtn" style="margin-top:18px">Erneut versuchen</button>`;
+        document.getElementById('retryConnectBtn').onclick = () => renderLock();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1200 * attempt));
+    }
   }
+
+  if (!status.configured) {
+    renderSetup(lock);
+  } else {
+    renderLogin(lock);
+  }
+}
+
 
   if (!status.configured) {
     renderSetup(lock);
