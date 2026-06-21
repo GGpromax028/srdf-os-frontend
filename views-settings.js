@@ -30,6 +30,22 @@ async function renderSettings(view) {
       <div class="row"><div class="row-icon">▶</div><div class="row-text"><div class="row-title">Higgsfield (Video)</div></div>${statusBadgeFor(state.higgsfieldConfigured)}</div>
       <div class="row"><div class="row-icon">◈</div><div class="row-text"><div class="row-title">Instagram</div></div>${statusBadgeFor(state.instagramConfigured)}</div>
     </div>
+
+    <div class="section-h">System &amp; Datenschutz</div>
+    <div class="glass">
+      <button class="row" style="width:100%;text-align:left" id="systemHealthRow">
+        <div class="row-icon">♥</div>
+        <div class="row-text"><div class="row-title">System-Gesundheit</div><div class="row-sub">Live-Check aller Sicherheitseinstellungen</div></div>
+      </button>
+      <button class="row" style="width:100%;text-align:left" id="backupsRow">
+        <div class="row-icon">⟲</div>
+        <div class="row-text"><div class="row-title">Backups</div><div class="row-sub">Automatisch täglich, 7 Tage aufbewahrt</div></div>
+      </button>
+      <button class="row" style="width:100%;text-align:left" id="privacyAuditRow">
+        <div class="row-icon">🔒</div>
+        <div class="row-text"><div class="row-title">Datenschutz-Übersicht</div><div class="row-sub">Was wird gespeichert, was wird geteilt</div></div>
+      </button>
+    </div>
   `;
 
   renderPermsList(perms);
@@ -41,6 +57,9 @@ async function renderSettings(view) {
       <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
     `);
   };
+  document.getElementById('systemHealthRow').onclick = openSystemHealthSheet;
+  document.getElementById('backupsRow').onclick = openBackupsSheet;
+  document.getElementById('privacyAuditRow').onclick = openPrivacyAuditSheet;
 }
 
 function statusBadgeFor(configured) {
@@ -64,11 +83,129 @@ function renderPermsList(perms) {
         await api(`/settings/permissions/${key}`, { method: 'PUT', body: { enabled: newState } });
         toast(newState ? 'Aktiviert' : 'Deaktiviert', '', 'success');
       } catch (err) {
-        sw.classList.toggle('on'); // zurücksetzen bei Fehler
+        sw.classList.toggle('on');
         toast('Änderung fehlgeschlagen', err.message, 'error');
       }
     };
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// SYSTEM-GESUNDHEIT
+// ═══════════════════════════════════════════════════════════
+async function openSystemHealthSheet() {
+  openSheet(`<div class="sheet-title">System-Gesundheit</div><div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`);
+
+  try {
+    const result = await api('/system/health-detail');
+    const rows = result.checks.map(c => `
+      <div class="row">
+        <div class="row-icon">${c.ok ? '✓' : '⚠'}</div>
+        <div class="row-text">
+          <div class="row-title">${escapeHtml(c.name)}</div>
+          <div class="row-sub">${escapeHtml(c.detail)}</div>
+        </div>
+      </div>`).join('');
+
+    openSheet(`
+      <div class="sheet-title">System-Gesundheit</div>
+      <div class="sheet-sub">
+        <span class="badge badge-${result.healthy ? 'green' : 'amber'}">${result.healthy ? 'Alles in Ordnung' : 'Achtung nötig'}</span>
+      </div>
+      <div class="glass" style="margin-top:4px">${rows}</div>
+    `);
+  } catch (err) {
+    openSheet(`<div class="sheet-title">Fehler</div><div class="sheet-sub">${escapeHtml(err.message)}</div>`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// BACKUPS
+// ═══════════════════════════════════════════════════════════
+async function openBackupsSheet() {
+  openSheet(`<div class="sheet-title">Backups</div><div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`);
+
+  try {
+    const backups = await api('/backup/list');
+    const rows = backups.length === 0
+      ? emptyState('⟲', 'Noch kein Backup', 'Das erste Backup wird automatisch beim nächsten Server-Start erstellt.')
+      : backups.map(b => `
+        <div class="row">
+          <div class="row-icon">⟲</div>
+          <div class="row-text">
+            <div class="row-title">${formatRelativeTime(b.createdAt.replace('T', ' ').slice(0, 19))}</div>
+            <div class="row-sub">${b.sizeKb} KB</div>
+          </div>
+        </div>`).join('');
+
+    openSheet(`
+      <div class="sheet-title">Backups</div>
+      <div class="sheet-sub">Automatisch jede Nacht, die letzten 7 werden aufbewahrt.</div>
+      <div class="glass" style="margin-bottom:16px">${rows}</div>
+      <button class="btn btn-glass btn-full" id="runBackupBtn">Jetzt manuell sichern</button>
+    `);
+
+    document.getElementById('runBackupBtn').onclick = async () => {
+      const btn = document.getElementById('runBackupBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div>';
+      try {
+        await api('/backup/run', { method: 'POST' });
+        toast('Backup gestartet', 'Läuft im Hintergrund, kurz warten und neu öffnen.', 'success');
+        closeSheet();
+      } catch (err) {
+        toast('Fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Jetzt manuell sichern';
+      }
+    };
+  } catch (err) {
+    openSheet(`<div class="sheet-title">Fehler</div><div class="sheet-sub">${escapeHtml(err.message)}</div>`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DATENSCHUTZ-AUDIT
+// ═══════════════════════════════════════════════════════════
+const SENSITIVITY_BADGE = { 'sehr hoch': 'red', hoch: 'amber', niedrig: 'gray' };
+
+async function openPrivacyAuditSheet() {
+  openSheet(`<div class="sheet-title">Datenschutz-Übersicht</div><div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`);
+
+  try {
+    const audit = await api('/privacy/audit');
+    const rows = audit.dataInventory.map(item => `
+      <div style="padding:14px 16px;border-bottom:1px solid var(--glass-edge-soft)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:13.5px;font-weight:700">${escapeHtml(item.category)}</div>
+          <span class="badge badge-${SENSITIVITY_BADGE[item.sensitivity] || 'gray'}">${escapeHtml(item.sensitivity)}</span>
+        </div>
+        <div style="font-size:12px;color:var(--ink-dim);line-height:1.5;margin-bottom:4px">${escapeHtml(item.whatIsStored)}</div>
+        <div style="font-size:11px;color:${item.sharedWithThirdParties ? 'var(--signal-amber)' : 'var(--success)'}">
+          ${item.sharedWithThirdParties ? '⚠ ' + escapeHtml(typeof item.sharedWithThirdParties === 'string' ? item.sharedWithThirdParties : 'Wird an Dritte weitergegeben') : '✓ Bleibt vollständig privat'}
+        </div>
+        ${item.note ? `<div style="font-size:11px;color:var(--depth-blue);margin-top:4px">${escapeHtml(item.note)}</div>` : ''}
+      </div>`).join('');
+
+    openSheet(`
+      <div class="sheet-title">Datenschutz-Übersicht</div>
+      <div class="sheet-sub">Ehrlich, was wirklich gespeichert wird — keine Marketing-Sprache.</div>
+      <div class="glass" style="margin-bottom:16px">${rows}</div>
+      <button class="btn btn-glass btn-full" id="purgeDataBtn">Alte Protokolldaten löschen (1 Jahr+)</button>
+    `);
+
+    document.getElementById('purgeDataBtn').onclick = async () => {
+      try {
+        const result = await api('/privacy/purge', { method: 'POST', body: { olderThanDays: 365 } });
+        toast('Aufgeräumt', `${result.activityLogDeleted + result.aiGenerationsDeleted} alte Einträge entfernt`, 'success');
+        closeSheet();
+      } catch (err) {
+        toast('Fehlgeschlagen', err.message, 'error');
+      }
+    };
+  } catch (err) {
+    openSheet(`<div class="sheet-title">Fehler</div><div class="sheet-sub">${escapeHtml(err.message)}</div>`);
+  }
 }
 
 function openChangePasswordSheet() {
@@ -103,6 +240,11 @@ function openChangePasswordSheet() {
 // START
 // ═══════════════════════════════════════════════════════════
 initAuth();
+
+const healthUrl = API_BASE.replace(/\/api\/?$/, '/health');
+setInterval(() => {
+  fetch(healthUrl).catch(() => {});
+}, 4 * 60 * 1000);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
