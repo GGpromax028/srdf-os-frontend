@@ -213,6 +213,7 @@ async function runSalesAnalysis() {
 
 // ═══════════════════════════════════════════════════════════
 // TREND-RECHERCHE · Echte Websuche über Claude
+// + automatischer Abgleich mit echten Shopify-Produkten
 // ═══════════════════════════════════════════════════════════
 function openTrendResearchSheet() {
   openSheet(`
@@ -244,13 +245,7 @@ function openTrendResearchSheet() {
         closeSheet();
         toast('Recherche fertig', '', 'success');
         navigateTo('ai');
-        setTimeout(() => showGenerationDetail({
-          kind: 'trend_research',
-          output: result.text,
-          sources: result.sources,
-          approved: false,
-          id: null,
-        }), 200);
+        setTimeout(() => showTrendResults(result), 200);
       } catch (err) {
         toast('Recherche fehlgeschlagen', err.message, 'error');
         btn.disabled = false;
@@ -258,6 +253,84 @@ function openTrendResearchSheet() {
       }
     });
   };
+}
+
+function showTrendResults(result) {
+  const sourcesHtml = (result.sources && result.sources.length > 0)
+    ? `<div style="margin-bottom:16px">
+        <div style="font-size:11px;color:var(--ink-dim);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Quellen</div>
+        ${result.sources.map(url => `<a href="${escapeHtml(url)}" target="_blank" style="display:block;font-size:11.5px;color:var(--depth-blue);margin-bottom:4px;word-break:break-all">${escapeHtml(url)}</a>`).join('')}
+      </div>`
+    : '';
+
+  const matches = result.matchingProducts || [];
+  const matchesHtml = matches.length > 0
+    ? `
+      <div class="sheet-title" style="font-size:15px;margin-top:24px">Passt zu deinen Produkten</div>
+      <div class="sheet-sub" style="margin-bottom:14px">Diese Produkte in deinem Shop passen zu den gefundenen Trends — direkt Marketing dazu erstellen:</div>
+      ${matches.map(m => `
+        <div class="row glass" style="margin-bottom:8px;border-radius:14px">
+          <div class="row-icon">◫</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(m.title)}</div>
+            <div class="row-sub">Trifft auf: ${m.matchedKeywords.map(escapeHtml).join(', ')}</div>
+          </div>
+          <button class="btn btn-glass" style="padding:8px 12px;font-size:11.5px" data-trend-product-id="${escapeHtml(m.shopifyId)}" data-trend-product-title="${escapeHtml(m.title)}">Marketing</button>
+        </div>
+      `).join('')}
+    `
+    : matches.length === 0 && (result.keywords || []).length > 0
+      ? `<div class="empty glass" style="margin-top:20px">
+          <div class="empty-icon">○</div>
+          <div class="empty-title">Kein passendes Produkt im Shop</div>
+          <div class="empty-sub">Keiner deiner gesyncten Produktnamen passt zu den gefundenen Trend-Stichwörtern. Eventuell lohnt sich ein neues Produkt in dieser Richtung.</div>
+        </div>`
+      : '';
+
+  openSheet(`
+    <div class="sheet-title">Trend-Recherche</div>
+    <div class="sheet-sub">Echte Websuche, mit Quellen zum Nachprüfen</div>
+    <div class="glass" style="padding:16px;margin-bottom:16px;font-size:13.5px;line-height:1.6;white-space:pre-wrap">${escapeHtml(result.text)}</div>
+    ${sourcesHtml}
+    ${matchesHtml}
+  `);
+
+  document.querySelectorAll('[data-trend-product-id]').forEach(btn => {
+    btn.onclick = () => {
+      const productId = btn.dataset.trendProductId;
+      const productTitle = btn.dataset.trendProductTitle;
+      closeSheet();
+      setTimeout(() => openTrendToMarketingSheet(productId, productTitle), 200);
+    };
+  });
+}
+
+function openTrendToMarketingSheet(productId, productTitle) {
+  openSheet(`
+    <div class="sheet-title">Marketing für "${escapeHtml(productTitle)}"</div>
+    <div class="sheet-sub">Auf Basis des gefundenen Trends — wähle, was du jetzt erstellen willst.</div>
+    <button class="btn btn-primary btn-full" id="trendToCaption" style="margin-bottom:10px">Social-Caption generieren</button>
+    ${state.higgsfieldConfigured ? `<button class="btn btn-glass btn-full" id="trendToVideo">Marketing-Video generieren</button>` : ''}
+  `);
+
+  document.getElementById('trendToCaption').onclick = () => {
+    closeSheet();
+    setTimeout(() => {
+      openCaptionSheet();
+      setTimeout(() => {
+        const titleField = document.getElementById('capTitle');
+        if (titleField) titleField.value = productTitle;
+      }, 50);
+    }, 200);
+  };
+
+  const videoBtn = document.getElementById('trendToVideo');
+  if (videoBtn) {
+    videoBtn.onclick = () => {
+      closeSheet();
+      setTimeout(() => openVideoGenerationSheet(), 200);
+    };
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
