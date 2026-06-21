@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datenschutzerklärung — SRDF-OS</title>
+<style>
+  :root{
+    --obsidian:#050507;
+    --glass-fill:rgba(255,255,255,.07);
+    --glass-edge:rgba(255,255,255,.14);
+    --signal-amber:#ff9f0a;
+    --ink:#f5f5f7;
+    --ink-dim:#86868b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--obsidian);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;
+    line-height:1.6;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:48px 24px 80px}
+  h1{font-size:26px;font-weight:800;letter-spacing:-.03em;margin-bottom:6px}
+  .sub{color:var(--ink-dim);font-size:13px;margin-bottom:36px}
+  h2{font-size:17px;font-weight:700;margin-top:36px;margin-bottom:10px;color:var(--signal-amber)}
+  p,li{font-size:14.5px;color:rgba(245,245,247,.85)}
+  ul{padding-left:20px}
+  li{margin-bottom:6px}
+  .card{
+    background:var(--glass-fill);border:1px solid var(--glass-edge);
+    border-radius:16px;padding:18px 20px;margin:20px 0;
+  }
+  a{color:#0a84ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Datenschutzerklärung</h1>
+  <div class="sub">SRDF-OS · Stand: 21. Juni 2026</div>
+
+  <div class="card">
+    Diese App ist ein <strong>privates Einzelprojekt</strong> zur Verwaltung eines persönlichen
+    Online-Shops. Sie wird von genau einer Person betrieben und genutzt — es gibt keine
+    weiteren Nutzerkonten, keine öffentliche Registrierung und keinen Zugriff durch Dritte.
+  </div>
+
+  <h2>1. Verantwortliche Person</h2>
+  <p>Diese App wird von einer Einzelperson als privates Projekt betrieben, nicht von einem
+  eingetragenen Unternehmen.</p>
+
+  <h2>2. Welche Daten werden verarbeitet?</h2>
+  <ul>
+    <li><strong>Login-Daten:</strong> ein verschlüsselter Passwort-Hash (bcrypt). Das Passwort
+    selbst wird zu keinem Zeitpunkt gespeichert.</li>
+    <li><strong>Shopify-Geschäftsdaten:</strong> Produkte und Bestellungen des eigenen Shops,
+    inklusive Kundendaten, die im Rahmen der Bestellabwicklung anfallen (Name, Adresse,
+    Kontaktdaten der eigenen Kunden).</li>
+    <li><strong>KI-generierte Inhalte:</strong> Texte und Recherchen, die über die Anthropic-API
+    erzeugt werden.</li>
+    <li><strong>Social-Media-Inhalte:</strong> Beitragstexte und Medien-URLs zur Veröffentlichung
+    auf verbundenen Plattformen.</li>
+    <li><strong>Protokolldaten:</strong> Zeitstempel von Systemaktionen zur Nachvollziehbarkeit.</li>
+  </ul>
+
+  <h2>3. Weitergabe an Dritte</h2>
+  <p>Daten werden ausschließlich an folgende Dienste übermittelt, und nur im jeweils notwendigen
+  Umfang:</p>
+  <ul>
+    <li><strong>Anthropic (Claude-API):</strong> Produkttexte und anonymisierte Verkaufskennzahlen
+    (keine Kundendaten) zur Text- bzw. Recherche-Generierung.</li>
+    <li><strong>Shopify:</strong> Lesender Zugriff auf die eigenen Shop-Daten über die offizielle
+    Admin-API.</li>
+    <li><strong>Pinterest, Instagram, TikTok:</strong> Beitragsinhalte, ausschließlich nach
+    expliziter manueller Bestätigung durch die verantwortliche Person — niemals automatisch
+    ohne Freigabe.</li>
+    <li><strong>Higgsfield:</strong> Produktbilder zur Video-Generierung, ebenfalls nur auf
+    expliziten Wunsch.</li>
+  </ul>
+  <p>Es findet kein Verkauf von Daten an Dritte statt. Es werden keine Daten zu
+  Werbezwecken an Drittanbieter weitergegeben.</p>
+
+  <h2>4. Speicherort und Sicherheit</h2>
+  <p>Daten werden in einer Datenbank gespeichert, die auf einem europäischen/US-amerikanischen
+  Cloud-Server (Railway) gehostet wird, gesichert durch Passwort-Hashing, verschlüsselte
+  Verbindungen (HTTPS) und eingeschränkten Zugriff (nur die verantwortliche Person via Login).
+  Automatische tägliche Backups werden für 7 Tage aufbewahrt.</p>
+
+  <h2>5. Speicherdauer</h2>
+  <p>Geschäftsdaten (Produkte, Bestellungen) werden so lange aufbewahrt, wie für die
+  Shop-Verwaltung erforderlich. Protokolldaten und nicht freigegebene KI-Inhalte können über
+  eine in der App integrierte Funktion manuell gelöscht werden.</p>
+
+  <h2>6. Rechte der betroffenen Person</h2>
+  <p>Als alleinige Nutzerin/alleiniger Nutzer dieser App hat die verantwortliche Person
+  jederzeit vollständigen Einblick und Kontrolle über alle gespeicherten Daten über die
+  integrierte Datenschutz-Übersicht in den App-Einstellungen.</p>
+
+  <h2>7. Kontakt</h2>
+  <p>Bei Fragen zu dieser Datenschutzerklärung kann über die in der App hinterlegten
+  Kontaktmöglichkeiten Verbindung aufgenommen werden.</p>
+
+  <div class="card" style="margin-top:40px;font-size:13px;color:var(--ink-dim)">
+    Diese Erklärung wird aktualisiert, sobald sich die Datenverarbeitung wesentlich ändert
+    (z. B. durch neue verbundene Dienste).
+  </div>
+</div>
+</body>
+</html>
