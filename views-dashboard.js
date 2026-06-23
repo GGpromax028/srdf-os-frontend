@@ -52,12 +52,13 @@ async function navigateTo(tab) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// DASHBOARD — die "Lebenszeichen"-Karte
+// DASHBOARD
 // ═══════════════════════════════════════════════════════════
 async function renderDashboard(view) {
-  const [posts, history] = await Promise.all([
+  const [posts, history, lowStock] = await Promise.all([
     api('/social/posts').catch(() => []),
     api('/ai/history').catch(() => []),
+    api('/stats/low-stock').catch(() => []),
   ]);
 
   const pendingPosts = posts.filter(p => p.status === 'draft' || p.status === 'scheduled');
@@ -74,13 +75,34 @@ async function renderDashboard(view) {
   } else if (failedPosts.length > 0) {
     headline = `${failedPosts.length} Beitrag konnte nicht veröffentlicht werden.`;
     badgeKind = 'red'; badgeText = 'Achtung nötig';
-  } else if (pendingPosts.length > 0) {
-    headline = `${pendingPosts.length} Entwurf wartet auf deine Freigabe.`;
+  } else if (lowStock.some(p => p.urgency === 'ausverkauft')) {
+    headline = `${lowStock.filter(p => p.urgency === 'ausverkauft').length} Produkt ausverkauft.`;
+    badgeKind = 'red'; badgeText = 'Bestand kritisch';
+  } else if (pendingPosts.length > 0 || lowStock.length > 0) {
+    headline = pendingPosts.length > 0
+      ? `${pendingPosts.length} Entwurf wartet auf deine Freigabe.`
+      : `${lowStock.length} Produkt mit niedrigem Bestand.`;
     badgeKind = 'amber'; badgeText = 'Wartet auf dich';
   } else {
     headline = 'Alles läuft reibungslos. Kein Handlungsbedarf.';
     badgeKind = 'green'; badgeText = 'Im grünen Bereich';
   }
+
+  const lowStockHtml = (state.shopifyConfigured && lowStock.length > 0) ? `
+    <div class="section-h">Lagerbestand-Warnungen</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${lowStock.map(p => `
+        <div class="row">
+          <div class="row-icon" style="color:${p.urgency === 'ausverkauft' ? 'var(--danger)' : p.urgency === 'kritisch' ? 'var(--signal-amber)' : 'var(--ink-dim)'}">
+            ${p.urgency === 'ausverkauft' ? '✕' : '⚠'}
+          </div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(p.title)}</div>
+            <div class="row-sub">${p.urgency === 'ausverkauft' ? 'Ausverkauft' : `Noch ${p.inventoryQty} auf Lager`} · ${p.price != null ? p.price.toFixed(2) + ' €' : ''}</div>
+          </div>
+          <span class="badge badge-${p.urgency === 'ausverkauft' ? 'red' : p.urgency === 'kritisch' ? 'amber' : 'gray'}">${escapeHtml(p.urgency)}</span>
+        </div>`).join('')}
+    </div>` : '';
 
   view.innerHTML = `
     <div class="vital-card glass fade-up">
@@ -97,6 +119,8 @@ async function renderDashboard(view) {
         <div><div class="vital-metric-num">${history.length}</div><div class="vital-metric-label">KI-Texte erstellt</div></div>
       </div>
     </div>
+
+    ${lowStockHtml}
 
     <div class="grid2">
       <div class="card glass fade-up" id="quickShopify">
@@ -152,21 +176,18 @@ function formatActionLabel(action) {
     ai_generate_product_description: 'Produktbeschreibung erstellt',
     ai_generate_caption: 'Social-Caption erstellt',
     ai_sales_analysis: 'Verkaufsanalyse erstellt',
+    ai_trend_research: 'Trend-Recherche durchgeführt',
     instagram_post_published: 'Instagram-Beitrag veröffentlicht',
     instagram_post_failed: 'Instagram-Beitrag fehlgeschlagen',
     post_draft_created: 'Entwurf erstellt',
     permission_changed: 'Berechtigung geändert',
     owner_password_changed: 'Passwort geändert',
+    low_stock_alert: '⚠ Lagerbestand-Warnung',
+    backup_completed: 'Backup erstellt',
+    health_check_warning: '⚠ System-Gesundheitswarnung',
   };
   return map[action] || action;
 }
 
 function formatRelativeTime(iso) {
-  const diffMs = Date.now() - new Date(iso.replace(' ', 'T') + 'Z').getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'gerade jetzt';
-  if (mins < 60) return `vor ${mins} Min.`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `vor ${hours} Std.`;
-  return `vor ${Math.floor(hours / 24)} Tg.`;
-}
+  const diffMs = Date.now() - new Date(iso.replace('
