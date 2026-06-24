@@ -18,6 +18,7 @@ const state = {
   aiConfigured: false,
   shopifyConfigured: false,
   instagramConfigured: false,
+  higgsfieldConfigured: false,
   backgroundActive: false,
 };
 
