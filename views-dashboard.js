@@ -55,10 +55,11 @@ async function navigateTo(tab) {
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
 async function renderDashboard(view) {
-  const [posts, history, lowStock] = await Promise.all([
+  const [posts, history, lowStock, dailyReport] = await Promise.all([
     api('/social/posts').catch(() => []),
     api('/ai/history').catch(() => []),
     api('/stats/low-stock').catch(() => []),
+    api('/ai/daily-report').catch(() => null),
   ]);
 
   const pendingPosts = posts.filter(p => p.status === 'draft' || p.status === 'scheduled');
@@ -87,6 +88,19 @@ async function renderDashboard(view) {
     headline = 'Alles läuft reibungslos. Kein Handlungsbedarf.';
     badgeKind = 'green'; badgeText = 'Im grünen Bereich';
   }
+
+  const dailyReportHtml = state.aiConfigured ? `
+    <div class="section-h">Tages-Report</div>
+    <div class="glass" style="margin-bottom:14px; padding:14px">
+      ${dailyReport ? `
+        <div class="row-sub" style="margin-bottom:8px">Für ${formatDateDe(dailyReport.date)} · erstellt ${formatRelativeTime(dailyReport.created_at)}</div>
+        <div style="white-space:pre-wrap; line-height:1.5">${escapeHtml(dailyReport.output)}</div>
+        <button class="btn btn-ghost" id="regenReport" style="margin-top:10px; font-size:13px">Neu erstellen</button>
+      ` : `
+        <div class="empty-sub" style="margin-bottom:10px">Noch kein Report vorhanden. Läuft automatisch jeden Morgen um 7:30 Uhr — oder jetzt manuell erstellen:</div>
+        <button class="btn btn-primary" id="regenReport">Report jetzt erstellen</button>
+      `}
+    </div>` : '';
 
   const lowStockHtml = (state.shopifyConfigured && lowStock.length > 0) ? `
     <div class="section-h">Lagerbestand-Warnungen</div>
@@ -120,6 +134,7 @@ async function renderDashboard(view) {
       </div>
     </div>
 
+    ${dailyReportHtml}
     ${lowStockHtml}
 
     <div class="grid2">
@@ -141,6 +156,22 @@ async function renderDashboard(view) {
 
   document.getElementById('quickShopify').onclick = () => navigateTo('shopify');
   document.getElementById('quickAi').onclick = () => navigateTo('ai');
+
+  const regenBtn = document.getElementById('regenReport');
+  if (regenBtn) {
+    regenBtn.onclick = async () => {
+      regenBtn.disabled = true;
+      regenBtn.textContent = 'Erstelle...';
+      try {
+        await api('/ai/daily-report/generate', { method: 'POST' });
+        await renderDashboard(view);
+      } catch (err) {
+        toast('Report konnte nicht erstellt werden', err.message, 'error');
+        regenBtn.disabled = false;
+        regenBtn.textContent = 'Erneut versuchen';
+      }
+    };
+  }
 
   loadActivityList();
 }
@@ -190,4 +221,17 @@ function formatActionLabel(action) {
 }
 
 function formatRelativeTime(iso) {
-  const diffMs = Date.now() - new Date(iso.replace('
+  const diffMs = Date.now() - new Date(iso.replace(' ', 'T') + 'Z').getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'gerade jetzt';
+  if (mins < 60) return `vor ${mins} Min.`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `vor ${hours} Std.`;
+  return `vor ${Math.floor(hours / 24)} Tg.`;
+}
+
+function formatDateDe(dateStr) {
+  // dateStr im Format YYYY-MM-DD
+  const [y, m, d] = dateStr.split('-');
+  return `${d}.${m}.${y}`;
+}
