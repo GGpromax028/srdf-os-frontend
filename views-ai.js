@@ -2,10 +2,11 @@
 // KI-VIEW
 // ═══════════════════════════════════════════════════════════
 async function renderAi(view) {
-  const [aiStatus, higgsfieldStatus, history] = await Promise.all([
+  const [aiStatus, higgsfieldStatus, history, costStatus] = await Promise.all([
     api('/ai/status').catch(() => ({ configured: false })),
     api('/higgsfield/status').catch(() => ({ configured: false })),
     api('/ai/history').catch(() => []),
+    api('/ai/cost-status').catch(() => null),
   ]);
   state.aiConfigured = aiStatus.configured;
   state.higgsfieldConfigured = higgsfieldStatus.configured;
@@ -18,7 +19,26 @@ async function renderAi(view) {
     return;
   }
 
+  const costCardHtml = (state.aiConfigured && costStatus) ? `
+    <div class="glass" id="costStatusCard" style="margin-bottom:14px; padding:14px; cursor:pointer">
+      ${costStatus.unlimited ? `
+        <div class="row-sub">Heute ausgegeben: ${costStatus.spentEur.toFixed(2)}€ · Kein Tageslimit gesetzt</div>
+      ` : `
+        <div class="row-sub" style="margin-bottom:6px">Heutige KI-Ausgaben</div>
+        <div style="display:flex; align-items:baseline; gap:6px; margin-bottom:8px">
+          <span style="font-size:20px; font-weight:700; color:${costStatus.blocked ? 'var(--danger)' : 'var(--ink)'}">${costStatus.spentEur.toFixed(2)}€</span>
+          <span class="row-sub">von ${costStatus.limitEur.toFixed(2)}€ Tageslimit</span>
+        </div>
+        <div style="height:6px; background:rgba(255,255,255,.08); border-radius:3px; overflow:hidden">
+          <div style="height:100%; width:${Math.min(100, (costStatus.spentEur / costStatus.limitEur) * 100)}%; background:${costStatus.blocked ? 'var(--danger)' : 'var(--depth-blue)'}"></div>
+        </div>
+        ${costStatus.blocked ? '<div style="margin-top:8px; font-size:12px; color:var(--danger)">⚠ Limit erreicht — KI-Funktionen heute gesperrt</div>' : ''}
+      `}
+      <div style="margin-top:8px; font-size:11px; color:var(--ink-dim)">Tippen, um Limit zu ändern</div>
+    </div>` : '';
+
   view.innerHTML = `
+    ${costCardHtml}
     ${!state.aiConfigured ? '' : `
     <div class="grid2">
       <div class="card glass" id="genDescCard">
@@ -61,6 +81,9 @@ async function renderAi(view) {
 
   renderAiHistory(history);
 
+  const costCard = document.getElementById('costStatusCard');
+  if (costCard) costCard.onclick = () => openCostLimitSheet(costStatus);
+
   if (state.aiConfigured) {
     document.getElementById('genDescCard').onclick = openDescriptionSheet;
     document.getElementById('genCaptionCard').onclick = openCaptionSheet;
@@ -102,6 +125,35 @@ function kindLabel(kind) {
     sales_analysis: 'Verkaufsanalyse',
     trend_research: 'Trend-Recherche',
   }[kind] || kind;
+}
+
+function openCostLimitSheet(costStatus) {
+  const currentLimit = costStatus?.unlimited ? 0 : (costStatus?.limitEur ?? 2);
+  openSheet(`
+    <div class="sheet-title">Tageslimit für KI-Ausgaben</div>
+    <div class="sheet-sub">Schützt dich davor, unbemerkt zu viel auszugeben. Berechnet aus den echten Token-Zahlen jeder Generierung. 0 = kein Limit.</div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label">Limit pro Tag (in €)</label>
+      <input class="input" id="costLimitInput" type="number" min="0" step="0.5" value="${currentLimit}">
+    </div>
+    <button class="btn btn-primary btn-full" id="costLimitSaveBtn">Speichern</button>
+    <div style="font-size:11px; color:var(--ink-dim); margin-top:10px; text-align:center">Heute bereits ausgegeben: ${(costStatus?.spentEur ?? 0).toFixed(2)}€</div>
+  `);
+
+  document.getElementById('costLimitSaveBtn').onclick = async () => {
+    const value = Number(document.getElementById('costLimitInput').value);
+    const btn = document.getElementById('costLimitSaveBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      await api('/ai/cost-limit', { method: 'PUT', body: { limitEur: value } });
+      closeSheet();
+      toast('Limit gespeichert', '', 'success');
+      navigateTo('ai');
+    } catch (err) {
+      toast('Konnte nicht speichern', err.message, 'error');
+      btn.disabled = false; btn.textContent = 'Speichern';
+    }
+  };
 }
 
 function showGenerationDetail(item) {
