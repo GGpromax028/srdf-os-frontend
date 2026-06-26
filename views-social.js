@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 const PLATFORM_META = {
   instagram: { icon: '◈', label: 'Instagram', live: true },
-  pinterest: { icon: '▣', label: 'Pinterest', live: false },
+  pinterest: { icon: '▣', label: 'Pinterest', live: true },
   tiktok: { icon: '▲', label: 'TikTok', live: false },
 };
 
@@ -52,6 +52,7 @@ function renderAccountsList(accounts) {
           <div class="row-sub" style="margin-top:4px">${statusBadge}</div>
         </div>
         ${meta.live ? `<button class="btn btn-glass" style="padding:9px 14px;font-size:12px" data-test-platform="${acc.platform}">Testen</button>` : ''}
+        ${acc.platform === 'pinterest' && meta.live ? `<button class="btn btn-glass" style="padding:9px 14px;font-size:12px;margin-left:6px" data-pinterest-board="1">Board wählen</button>` : ''}
       </div>`;
   }).join('');
 
@@ -69,6 +70,50 @@ function renderAccountsList(accounts) {
       });
     };
   });
+
+  el.querySelectorAll('[data-pinterest-board]').forEach(btn => {
+    btn.onclick = openPinterestBoardSheet;
+  });
+}
+
+async function openPinterestBoardSheet() {
+  let boards;
+  try {
+    boards = await api('/social/pinterest/boards');
+  } catch (err) {
+    toast('Boards konnten nicht geladen werden', err.message, 'error');
+    return;
+  }
+
+  if (boards.length === 0) {
+    openSheet(`
+      <div class="sheet-title">Kein Pinterest-Board gefunden</div>
+      <div class="sheet-sub">Erstelle zuerst ein Board direkt in der Pinterest-App — danach erscheint es hier zur Auswahl.</div>
+      <button class="btn btn-glass btn-full" onclick="closeSheet()">Verstanden</button>`);
+    return;
+  }
+
+  openSheet(`
+    <div class="sheet-title">Standard-Board wählen</div>
+    <div class="sheet-sub">Neue Pinterest-Beiträge landen in diesem Board.</div>
+    <div class="field" style="margin-bottom:18px">
+      <select class="input" id="boardSelect" style="appearance:none">
+        ${boards.map(b => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn btn-primary btn-full" id="saveBoardBtn">Speichern</button>
+  `);
+
+  document.getElementById('saveBoardBtn').onclick = async () => {
+    const boardId = document.getElementById('boardSelect').value;
+    try {
+      await api('/social/pinterest/default-board', { method: 'PUT', body: { boardId } });
+      closeSheet();
+      toast('Board gespeichert', '', 'success');
+    } catch (err) {
+      toast('Speichern fehlgeschlagen', err.message, 'error');
+    }
+  };
 }
 
 const STATUS_META = {
@@ -96,19 +141,23 @@ function renderPostsList(posts) {
           <div class="row-title">${escapeHtml((p.caption || 'Ohne Text').slice(0, 40))}${p.created_by_ai ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
           <div class="row-sub"><span class="badge badge-${sm.badge}" style="margin-right:6px">${sm.label}</span>${meta.label}</div>
         </div>
-        ${p.status === 'draft' && meta.icon === '◈' ? `<button class="btn btn-primary" style="padding:9px 14px;font-size:12px" data-publish="${p.id}">Posten</button>` : ''}
+        ${p.status === 'draft' && meta.live ? `<button class="btn btn-primary" style="padding:9px 14px;font-size:12px" data-publish="${p.id}">Posten</button>` : ''}
       </div>`;
   }).join('');
 
   el.querySelectorAll('[data-publish]').forEach(btn => {
-    btn.onclick = () => confirmPublish(Number(btn.dataset.publish));
+    btn.onclick = () => {
+      const post = posts.find(p => p.id === Number(btn.dataset.publish));
+      const label = (PLATFORM_META[post?.platform] || {}).label || post?.platform || 'der Plattform';
+      confirmPublish(Number(btn.dataset.publish), label);
+    };
   });
 }
 
-function confirmPublish(postId) {
+function confirmPublish(postId, platformLabel) {
   openSheet(`
     <div class="sheet-title">Wirklich jetzt veröffentlichen?</div>
-    <div class="sheet-sub">Dieser Beitrag geht echt live auf Instagram — sichtbar für deine echten Follower. Das lässt sich danach nicht zurücknehmen.</div>
+    <div class="sheet-sub">Dieser Beitrag geht echt live auf ${escapeHtml(platformLabel)} — sichtbar für deine echten Follower. Das lässt sich danach nicht zurücknehmen.</div>
     <button class="btn btn-primary btn-full" id="confirmPublishBtn" style="margin-bottom:10px">Ja, jetzt veröffentlichen</button>
     <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
   `);
@@ -118,7 +167,7 @@ function confirmPublish(postId) {
     await withActivity(async () => {
       try {
         await api(`/social/posts/${postId}/publish`, { method: 'POST' });
-        toast('Veröffentlicht', 'Dein Beitrag ist jetzt echt live auf Instagram.', 'success');
+        toast('Veröffentlicht', `Dein Beitrag ist jetzt echt live auf ${platformLabel}.`, 'success');
         navigateTo('social');
       } catch (err) {
         toast('Veröffentlichung fehlgeschlagen', err.message, 'error');
@@ -136,7 +185,7 @@ function openNewDraftSheet() {
       <label class="field-label">Plattform</label>
       <select class="input" id="draftPlatform" style="appearance:none">
         <option value="instagram">Instagram</option>
-        <option value="pinterest">Pinterest (Posten erst nach Review möglich)</option>
+        <option value="pinterest">Pinterest</option>
         <option value="tiktok">TikTok (Posten erst nach Review möglich)</option>
       </select>
     </div>
