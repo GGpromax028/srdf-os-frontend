@@ -136,11 +136,12 @@ async function openBackupsSheet() {
             <div class="row-title">${formatRelativeTime(b.createdAt.replace('T', ' ').slice(0, 19))}</div>
             <div class="row-sub">${b.sizeKb} KB</div>
           </div>
+          <button class="btn btn-glass" style="padding:8px 12px;font-size:12px" data-download-backup="${escapeHtml(b.name)}">Download</button>
         </div>`).join('');
 
     openSheet(`
       <div class="sheet-title">Backups</div>
-      <div class="sheet-sub">Automatisch jede Nacht, die letzten 7 werden aufbewahrt.</div>
+      <div class="sheet-sub">Automatisch jede Nacht, die letzten 7 werden aufbewahrt. Lade dir regelmäßig eines herunter und speichere es z.B. auf Google Drive — falls Railway jemals komplett ausfällt, ist das deine einzige echte Rettung.</div>
       <div class="glass" style="margin-bottom:16px">${rows}</div>
       <button class="btn btn-glass btn-full" id="runBackupBtn">Jetzt manuell sichern</button>
     `);
@@ -159,8 +160,44 @@ async function openBackupsSheet() {
         btn.textContent = 'Jetzt manuell sichern';
       }
     };
+
+    document.querySelectorAll('[data-download-backup]').forEach(btn => {
+      btn.onclick = () => downloadBackup(btn.dataset.downloadBackup, btn);
+    });
   } catch (err) {
     openSheet(`<div class="sheet-title">Fehler</div><div class="sheet-sub">${escapeHtml(err.message)}</div>`);
+  }
+}
+
+// Lädt eine Backup-Datei herunter. Ein normaler <a href> würde nicht
+// funktionieren, weil die Route requireAuth nutzt (braucht den
+// Bearer-Token im Header) - Browser-Navigation sendet sowas nicht mit.
+// Deshalb: per fetch mit Header laden, als Blob in einen unsichtbaren
+// Link packen und automatisch "klicken".
+async function downloadBackup(filename, btn) {
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await fetch(`${API_BASE}/backup/download/${encodeURIComponent(filename)}`, {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    if (!res.ok) throw new Error('Download fehlgeschlagen.');
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    toast('Download fehlgeschlagen', err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
   }
 }
 
