@@ -8,11 +8,13 @@ const PLATFORM_META = {
 };
 
 async function renderSocial(view) {
-  const [accounts, posts] = await Promise.all([
+  const [accounts, posts, pinterestStatus] = await Promise.all([
     api('/social/accounts'),
     api('/social/posts'),
+    api('/social/pinterest/status').catch(() => ({ configured: false, appConfigured: false })),
   ]);
   state.socialAccounts = accounts;
+  state.pinterestStatus = pinterestStatus;
 
   view.innerHTML = `
     <div class="section-h">Verbundene Konten</div>
@@ -35,13 +37,27 @@ function renderAccountsList(accounts) {
   const el = document.getElementById('accountsList');
   el.innerHTML = accounts.map(acc => {
     const meta = PLATFORM_META[acc.platform];
+    const pStatus = state.pinterestStatus || {};
+    const needsPinterestConnect = acc.platform === 'pinterest' && meta.live && !pStatus.configured;
+
     let statusBadge;
     if (!meta.live) {
       statusBadge = `<span class="badge badge-gray">Review ausstehend</span>`;
+    } else if (needsPinterestConnect) {
+      statusBadge = pStatus.appConfigured
+        ? `<span class="badge badge-gray">Noch nicht verbunden</span>`
+        : `<span class="badge badge-gray">App-Zugangsdaten fehlen in .env</span>`;
     } else if (acc.connected) {
       statusBadge = `<span class="badge badge-green">Verbunden${acc.account_label ? ' · @' + escapeHtml(acc.account_label) : ''}</span>`;
     } else {
       statusBadge = `<span class="badge badge-gray">Nicht verbunden</span>`;
+    }
+
+    let actionButton = '';
+    if (needsPinterestConnect && pStatus.appConfigured) {
+      actionButton = `<a class="btn btn-primary" href="${API_BASE}/social/pinterest/oauth/start" target="_blank" rel="noopener" style="padding:9px 14px;font-size:12px;text-decoration:none">Mit Pinterest verbinden</a>`;
+    } else if (meta.live && !needsPinterestConnect) {
+      actionButton = `<button class="btn btn-glass" style="padding:9px 14px;font-size:12px" data-test-platform="${acc.platform}">Testen</button>`;
     }
 
     return `
@@ -51,8 +67,8 @@ function renderAccountsList(accounts) {
           <div class="row-title">${meta.label}</div>
           <div class="row-sub" style="margin-top:4px">${statusBadge}</div>
         </div>
-        ${meta.live ? `<button class="btn btn-glass" style="padding:9px 14px;font-size:12px" data-test-platform="${acc.platform}">Testen</button>` : ''}
-        ${acc.platform === 'pinterest' && meta.live ? `<button class="btn btn-glass" style="padding:9px 14px;font-size:12px;margin-left:6px" data-pinterest-board="1">Board wählen</button>` : ''}
+        ${actionButton}
+        ${acc.platform === 'pinterest' && meta.live && pStatus.configured ? `<button class="btn btn-glass" style="padding:9px 14px;font-size:12px;margin-left:6px" data-pinterest-board="1">Board wählen</button>` : ''}
       </div>`;
   }).join('');
 
