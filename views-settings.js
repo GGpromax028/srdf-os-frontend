@@ -41,6 +41,10 @@ async function renderSettings(view) {
         <div class="row-icon">⟲</div>
         <div class="row-text"><div class="row-title">Backups</div><div class="row-sub">Automatisch täglich, 7 Tage aufbewahrt</div></div>
       </button>
+      <button class="row" style="width:100%;text-align:left" id="notificationsRow">
+        <div class="row-icon">✉</div>
+        <div class="row-text"><div class="row-title">Benachrichtigungen</div><div class="row-sub">E-Mail bei kritischen Fehlern</div></div>
+      </button>
       <button class="row" style="width:100%;text-align:left" id="privacyAuditRow">
         <div class="row-icon">🔒</div>
         <div class="row-text"><div class="row-title">Datenschutz-Übersicht</div><div class="row-sub">Was wird gespeichert, was wird geteilt</div></div>
@@ -59,7 +63,46 @@ async function renderSettings(view) {
   };
   document.getElementById('systemHealthRow').onclick = openSystemHealthSheet;
   document.getElementById('backupsRow').onclick = openBackupsSheet;
+  document.getElementById('notificationsRow').onclick = openNotificationsSheet;
   document.getElementById('privacyAuditRow').onclick = openPrivacyAuditSheet;
+}
+
+async function openNotificationsSheet() {
+  openSheet(`<div class="sheet-title">Benachrichtigungen</div><div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`);
+
+  try {
+    const status = await api('/system/notifications/status');
+
+    openSheet(`
+      <div class="sheet-title">E-Mail-Benachrichtigungen</div>
+      <div class="sheet-sub">Bei kritischen Fehlern (z.B. fehlgeschlagener Beitrag, Backup-Problem) bekommst du automatisch eine E-Mail - höchstens eine pro 30 Minuten je Problem, damit es dich nicht überflutet.</div>
+      <div class="glass" style="margin-bottom:16px; padding:14px">
+        <div class="row-sub">${status.configured
+          ? '✓ Eingerichtet und aktiv'
+          : 'Noch nicht eingerichtet. Trage RESEND_API_KEY und NOTIFICATION_EMAIL in die .env-Datei des Backends ein (kostenloser Account auf resend.com).'}</div>
+      </div>
+      ${status.configured ? '<button class="btn btn-primary btn-full" id="sendTestEmailBtn">Test-E-Mail senden</button>' : ''}
+    `);
+
+    const testBtn = document.getElementById('sendTestEmailBtn');
+    if (testBtn) {
+      testBtn.onclick = async () => {
+        testBtn.disabled = true;
+        testBtn.innerHTML = '<div class="spinner"></div>';
+        try {
+          await api('/system/notifications/test', { method: 'POST' });
+          toast('Test-E-Mail gesendet', 'Prüfe dein Postfach (auch den Spam-Ordner).', 'success');
+        } catch (err) {
+          toast('Fehlgeschlagen', err.message, 'error');
+        } finally {
+          testBtn.disabled = false;
+          testBtn.textContent = 'Test-E-Mail senden';
+        }
+      };
+    }
+  } catch (err) {
+    openSheet(`<div class="sheet-title">Fehler</div><div class="sheet-sub">${escapeHtml(err.message)}</div>`);
+  }
 }
 
 function statusBadgeFor(configured) {
