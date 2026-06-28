@@ -267,7 +267,7 @@ function renderMarginSection(margins, lowMargins) {
     <div class="section-h">Margenrechner (${withCost.length}/${margins.length} Produkte erfasst)</div>
     ${warningHtml}
     <div class="glass" style="margin-bottom:10px; padding:12px">
-      <button class="btn btn-glass btn-full" id="pdfReportBtn">📄 Gewinn-Report als PDF (letzter Monat)</button>
+      <button class="btn btn-glass btn-full" id="pdfReportBtn">📄 Gewinn-Report als PDF</button>
     </div>
     <div class="glass" style="margin-bottom:14px" id="marginsList">
       ${margins.map(m => `
@@ -296,24 +296,91 @@ function wireMarginEditButtons() {
   });
 
   const pdfBtn = document.getElementById('pdfReportBtn');
-  if (pdfBtn) pdfBtn.onclick = () => downloadProfitReportPdf(pdfBtn);
+  if (pdfBtn) pdfBtn.onclick = openPdfReportRangeSheet;
 }
 
-// Lädt den PDF-Gewinn-Report für den letzten vollen Kalendermonat
-// herunter. Wie beim Backup-Download: braucht den Auth-Header, also
-// per fetch + Blob statt direktem <a href>.
-async function downloadProfitReportPdf(btn) {
+// Liefert Start/Ende für gängige Zeiträume. Alles als lokale
+// Kalendertage berechnet (kein UTC-Versatz), damit "dieses Jahr"
+// wirklich am 1. Januar deiner Zeitzone beginnt.
+function getDateRangePreset(preset) {
+  const today = new Date();
+  const fmt = (d) => d.toISOString().slice(0, 10);
+
+  if (preset === 'last_month') {
+    const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastMonthEnd = new Date(firstOfThisMonth - 1);
+    const lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
+    return { from: fmt(lastMonthStart), to: fmt(lastMonthEnd) };
+  }
+  if (preset === 'this_month') {
+    return { from: fmt(new Date(today.getFullYear(), today.getMonth(), 1)), to: fmt(today) };
+  }
+  if (preset === 'this_quarter') {
+    const quarterStartMonth = Math.floor(today.getMonth() / 3) * 3;
+    return { from: fmt(new Date(today.getFullYear(), quarterStartMonth, 1)), to: fmt(today) };
+  }
+  if (preset === 'this_year') {
+    return { from: fmt(new Date(today.getFullYear(), 0, 1)), to: fmt(today) };
+  }
+  if (preset === 'last_year') {
+    return { from: fmt(new Date(today.getFullYear() - 1, 0, 1)), to: fmt(new Date(today.getFullYear() - 1, 11, 31)) };
+  }
+  return null;
+}
+
+function openPdfReportRangeSheet() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  openSheet(`
+    <div class="sheet-title">Gewinn-Report als PDF</div>
+    <div class="sheet-sub">Wähle einen Zeitraum für deinen Report.</div>
+    <div class="field" style="margin-bottom:14px">
+      <select class="input" id="pdfRangePreset" style="appearance:none">
+        <option value="last_month">Letzter Monat</option>
+        <option value="this_month">Dieser Monat (bis heute)</option>
+        <option value="this_quarter">Dieses Quartal (bis heute)</option>
+        <option value="this_year">Dieses Jahr (bis heute)</option>
+        <option value="last_year">Letztes Jahr (komplett)</option>
+        <option value="custom">Eigener Zeitraum…</option>
+      </select>
+    </div>
+    <div id="pdfCustomRangeFields" style="display:none">
+      <div class="field"><label class="field-label">Von</label><input class="input" id="pdfFromDate" type="date" max="${todayStr}"></div>
+      <div class="field" style="margin-bottom:18px"><label class="field-label">Bis</label><input class="input" id="pdfToDate" type="date" max="${todayStr}"></div>
+    </div>
+    <button class="btn btn-primary btn-full" id="pdfGenerateBtn" style="margin-top:6px">PDF erstellen</button>
+  `);
+
+  const presetSelect = document.getElementById('pdfRangePreset');
+  const customFields = document.getElementById('pdfCustomRangeFields');
+  presetSelect.onchange = () => {
+    customFields.style.display = presetSelect.value === 'custom' ? 'block' : 'none';
+  };
+
+  document.getElementById('pdfGenerateBtn').onclick = async () => {
+    const preset = presetSelect.value;
+    let range;
+    if (preset === 'custom') {
+      const from = document.getElementById('pdfFromDate').value;
+      const to = document.getElementById('pdfToDate').value;
+      if (!from || !to) { toast('Zeitraum fehlt', 'Bitte beide Daten auswählen.', 'error'); return; }
+      if (from > to) { toast('Ungültiger Zeitraum', '"Von" muss vor "Bis" liegen.', 'error'); return; }
+      range = { from, to };
+    } else {
+      range = getDateRangePreset(preset);
+    }
+
+    const btn = document.getElementById('pdfGenerateBtn');
+    await downloadProfitReportPdf(btn, range);
+  };
+}
+
+// Lädt den PDF-Gewinn-Report für den gewählten Zeitraum herunter.
+// Wie beim Backup-Download: braucht den Auth-Header, also per fetch
+// + Blob statt direktem <a href>.
+async function downloadProfitReportPdf(btn, { from, to }) {
   const originalText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Erstelle PDF…';
-
-  const today = new Date();
-  const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const lastMonthEnd = new Date(firstOfThisMonth - 1);
-  const lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
-
-  const from = lastMonthStart.toISOString().slice(0, 10);
-  const to = lastMonthEnd.toISOString().slice(0, 10);
+  btn.innerHTML = '<div class="spinner"></div>';
 
   try {
     const res = await fetch(`${API_BASE}/stats/profit-report.pdf?from=${from}&to=${to}`, {
@@ -330,10 +397,10 @@ async function downloadProfitReportPdf(btn) {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    closeSheet();
     toast('PDF erstellt', '', 'success');
   } catch (err) {
     toast('Fehlgeschlagen', err.message, 'error');
-  } finally {
     btn.disabled = false;
     btn.textContent = originalText;
   }
