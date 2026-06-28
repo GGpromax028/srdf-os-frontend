@@ -232,12 +232,19 @@ function openDescriptionSheet() {
     <div class="sheet-title">Produktbeschreibung generieren</div>
     <div class="sheet-sub">Echter Claude-Aufruf — kostet eine kleine Menge deines API-Guthabens.</div>
     <div class="field"><label class="field-label">Produktname</label><input class="input" id="pdTitle" placeholder="z.B. Premium Sneaker XR"></div>
-    <div class="field" style="margin-bottom:18px"><label class="field-label">Eigenschaften</label><textarea class="input" id="pdFeatures" placeholder="z.B. atmungsaktiv, vegan, handgefertigt"></textarea></div>
+    <div class="field"><label class="field-label">Eigenschaften</label><textarea class="input" id="pdFeatures" placeholder="z.B. atmungsaktiv, vegan, handgefertigt"></textarea></div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label" style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="pdAbToggle" style="width:auto">
+        A/B-Test: zwei Varianten generieren und vergleichen
+      </label>
+    </div>
     <button class="btn btn-primary btn-full" id="pdGenBtn">Generieren</button>
   `);
   document.getElementById('pdGenBtn').onclick = async () => {
     const title = document.getElementById('pdTitle').value.trim();
     const features = document.getElementById('pdFeatures').value.trim();
+    const isAbTest = document.getElementById('pdAbToggle').checked;
     if (!title) { toast('Produktname fehlt', '', 'error'); return; }
 
     const btn = document.getElementById('pdGenBtn');
@@ -245,17 +252,65 @@ function openDescriptionSheet() {
 
     await withActivity(async () => {
       try {
-        const { text } = await api('/ai/product-description', { method: 'POST', body: { title, features } });
-        closeSheet();
-        toast('Text erstellt', '', 'success');
-        navigateTo('ai');
-        setTimeout(() => showGenerationDetail({ kind: 'product_description', output: text, approved: false, id: null }), 200);
+        if (isAbTest) {
+          const result = await api('/ai/product-description-ab', { method: 'POST', body: { title, features } });
+          closeSheet();
+          toast('Beide Varianten erstellt', '', 'success');
+          navigateTo('ai');
+          setTimeout(() => showAbComparisonSheet(result, title), 200);
+        } else {
+          const { text } = await api('/ai/product-description', { method: 'POST', body: { title, features } });
+          closeSheet();
+          toast('Text erstellt', '', 'success');
+          navigateTo('ai');
+          setTimeout(() => showGenerationDetail({ kind: 'product_description', output: text, approved: false, id: null }), 200);
+        }
       } catch (err) {
         toast('Fehlgeschlagen', err.message, 'error');
         btn.disabled = false; btn.textContent = 'Generieren';
       }
     });
   };
+}
+
+// Zeigt beide A/B-Varianten nebeneinander, mit Button "Diese wählen".
+// Die Wahl markiert die gewählte Variante als "approved" - die andere
+// bleibt unverändert als Vergleich in deiner Historie erhalten.
+function showAbComparisonSheet(result, title) {
+  openSheet(`
+    <div class="sheet-title">A/B-Test: ${escapeHtml(title)}</div>
+    <div class="sheet-sub">Wähle die Variante, die dir besser gefällt — sie wird als deine Entscheidung markiert.</div>
+
+    <div class="glass" style="padding:14px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--depth-blue);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Variante A · ${escapeHtml(result.variantA.label)}</div>
+      <div style="font-size:13.5px;line-height:1.6;margin-bottom:12px">${escapeHtml(result.variantA.text)}</div>
+      <button class="btn btn-primary btn-full" data-choose-variant="${result.variantA.id}">Diese Variante wählen</button>
+    </div>
+
+    <div class="glass" style="padding:14px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--depth-blue);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Variante B · ${escapeHtml(result.variantB.label)}</div>
+      <div style="font-size:13.5px;line-height:1.6;margin-bottom:12px">${escapeHtml(result.variantB.text)}</div>
+      <button class="btn btn-primary btn-full" data-choose-variant="${result.variantB.id}">Diese Variante wählen</button>
+    </div>
+  `);
+
+  document.querySelectorAll('[data-choose-variant]').forEach(btn => {
+    btn.onclick = async () => {
+      const id = btn.dataset.chooseVariant;
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div>';
+      try {
+        await api(`/ai/${id}/approve`, { method: 'POST' });
+        closeSheet();
+        toast('Variante gewählt', 'Du findest sie in deiner Historie markiert.', 'success');
+        navigateTo('ai');
+      } catch (err) {
+        toast('Fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Diese Variante wählen';
+      }
+    };
+  });
 }
 
 function openCaptionSheet() {
