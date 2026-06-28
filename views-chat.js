@@ -22,6 +22,7 @@ async function renderChat(view) {
     <div style="position:fixed; bottom:78px; left:0; right:0; padding:10px 16px; background:var(--bg-elevated, rgba(20,20,22,.92)); backdrop-filter:blur(20px); border-top:1px solid rgba(255,255,255,.08)">
       <div style="display:flex; gap:8px; max-width:600px; margin:0 auto">
         <input class="input" id="chatInput" placeholder="Frag etwas zu deinem Shop…" style="flex:1; margin:0" autocomplete="off">
+        <button class="btn btn-glass" id="chatMicBtn" style="padding:11px 14px; display:none">🎤</button>
         <button class="btn btn-primary" id="chatSendBtn" style="padding:11px 18px; white-space:nowrap">Senden</button>
       </div>
     </div>
@@ -31,10 +32,73 @@ async function renderChat(view) {
 
   const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('chatSendBtn');
+  const micBtn = document.getElementById('chatMicBtn');
 
   const send = () => sendChatMessageUi(input, sendBtn);
   sendBtn.onclick = send;
   input.onkeydown = (e) => { if (e.key === 'Enter') send(); };
+
+  setupVoiceInput(micBtn, input);
+}
+
+// ═══════════════════════════════════════════════════════════
+// Spracheingabe · Web Speech API (im Browser eingebaut, kein
+// Server-Call, keine Kosten). Funktioniert in Chrome/Safari auf
+// dem Handy. Erkennt der Browser die API nicht, bleibt der
+// Mikrofon-Button einfach versteckt - der Chat funktioniert dann
+// ganz normal nur per Tippen weiter.
+function setupVoiceInput(micBtn, input) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return; // Browser unterstützt es nicht - Button bleibt versteckt
+
+  micBtn.style.display = 'inline-flex';
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'de-DE';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  let isListening = false;
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    input.value = transcript;
+    input.focus();
+  };
+
+  recognition.onerror = (event) => {
+    isListening = false;
+    micBtn.textContent = '🎤';
+    micBtn.classList.remove('btn-primary');
+    micBtn.classList.add('btn-glass');
+    if (event.error === 'not-allowed') {
+      toast('Mikrofon-Zugriff verweigert', 'Bitte in den Browser-Einstellungen erlauben.', 'error');
+    }
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    micBtn.textContent = '🎤';
+    micBtn.classList.remove('btn-primary');
+    micBtn.classList.add('btn-glass');
+  };
+
+  micBtn.onclick = () => {
+    if (isListening) {
+      recognition.stop();
+      return;
+    }
+    isListening = true;
+    micBtn.textContent = '⏹';
+    micBtn.classList.remove('btn-glass');
+    micBtn.classList.add('btn-primary');
+    try {
+      recognition.start();
+    } catch {
+      // start() wirft, wenn schon eine Erkennung läuft - einfach ignorieren
+      isListening = false;
+    }
+  };
 }
 
 async function loadChatHistory() {
