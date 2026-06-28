@@ -49,6 +49,10 @@ async function renderSettings(view) {
         <div class="row-icon">🔒</div>
         <div class="row-text"><div class="row-title">Datenschutz-Übersicht</div><div class="row-sub">Was wird gespeichert, was wird geteilt</div></div>
       </button>
+      <button class="row" style="width:100%;text-align:left" id="clearChatRow">
+        <div class="row-icon">💬</div>
+        <div class="row-text"><div class="row-title">Chat-Verlauf löschen</div><div class="row-sub">Löscht dein gesamtes Gespräch mit dem Assistenten</div></div>
+      </button>
     </div>
   `;
 
@@ -65,6 +69,28 @@ async function renderSettings(view) {
   document.getElementById('backupsRow').onclick = openBackupsSheet;
   document.getElementById('notificationsRow').onclick = openNotificationsSheet;
   document.getElementById('privacyAuditRow').onclick = openPrivacyAuditSheet;
+  document.getElementById('clearChatRow').onclick = () => {
+    openSheet(`
+      <div class="sheet-title">Chat-Verlauf wirklich löschen?</div>
+      <div class="sheet-sub">Dein gesamtes bisheriges Gespräch mit dem Assistenten wird endgültig gelöscht. Das lässt sich nicht zurücknehmen.</div>
+      <button class="btn btn-danger btn-full" id="confirmClearChatBtn" style="margin-bottom:10px">Ja, Verlauf löschen</button>
+      <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+    `);
+    document.getElementById('confirmClearChatBtn').onclick = async () => {
+      const btn = document.getElementById('confirmClearChatBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div>';
+      try {
+        await api('/chat/history', { method: 'DELETE' });
+        closeSheet();
+        toast('Chat-Verlauf gelöscht', '', 'success');
+      } catch (err) {
+        toast('Fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Ja, Verlauf löschen';
+      }
+    };
+  };
 }
 
 async function openNotificationsSheet() {
