@@ -61,6 +61,11 @@ async function renderAi(view) {
       <span class="card-icon">📈</span>
       <div class="card-title">Trend-Recherche</div>
       <div class="card-sub">Echte Websuche: was ist aktuell gefragt? Mit Quellenangaben</div>
+    </div>
+    <div class="card glass" id="genCompetitorCard" style="margin-bottom:14px">
+      <span class="card-icon">🔍</span>
+      <div class="card-title">Konkurrenzbeobachtung</div>
+      <div class="card-sub">Echte Websuche zu einem Konkurrenten: Preise, Sortiment, Lücken</div>
     </div>`}
 
     ${!state.higgsfieldConfigured ? `
@@ -89,6 +94,7 @@ async function renderAi(view) {
     document.getElementById('genCaptionCard').onclick = openCaptionSheet;
     document.getElementById('genAnalysisCard').onclick = runSalesAnalysis;
     document.getElementById('genTrendsCard').onclick = openTrendResearchSheet;
+    document.getElementById('genCompetitorCard').onclick = openCompetitorAnalysisSheet;
   }
   if (state.higgsfieldConfigured) {
     document.getElementById('genVideoCard').onclick = openVideoGenerationSheet;
@@ -355,6 +361,92 @@ function showTrendResults(result) {
       setTimeout(() => openTrendToMarketingSheet(productId, productTitle), 200);
     };
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// KONKURRENZBEOBACHTUNG · Echte Websuche über Claude
+// ═══════════════════════════════════════════════════════════
+function openCompetitorAnalysisSheet() {
+  openSheet(`
+    <div class="sheet-title">Konkurrenzbeobachtung</div>
+    <div class="sheet-sub">Echte Websuche über Claude — nur öffentlich zugängliche Informationen (Shop-Seite, Preise, Bewertungen). Kostet zusätzlich zu Text-Tokens auch pro Suche.</div>
+    <div class="field">
+      <label class="field-label">Konkurrent (Name oder Shop-URL)</label>
+      <input class="input" id="competitorName" placeholder="z.B. Beispiel-Shop GmbH oder beispiel-shop.de">
+    </div>
+    <div class="field">
+      <label class="field-label">Worauf besonders achten? (optional)</label>
+      <input class="input" id="competitorFocus" placeholder="z.B. Preise, Versandkosten, Produktauswahl">
+    </div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label" style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="competitorCompareToggle" checked style="width:auto">
+        Mit meinem eigenen Shop vergleichen
+      </label>
+    </div>
+    <button class="btn btn-primary btn-full" id="competitorGenBtn">Analyse starten</button>
+    <div style="font-size:11px;color:var(--ink-dim);margin-top:10px;text-align:center">Hinweis: Websuche muss zusätzlich in deiner Anthropic Console aktiviert sein.</div>
+  `);
+
+  document.getElementById('competitorGenBtn').onclick = async () => {
+    const competitorName = document.getElementById('competitorName').value.trim();
+    const focus = document.getElementById('competitorFocus').value.trim();
+    const compare = document.getElementById('competitorCompareToggle').checked;
+
+    if (!competitorName) {
+      toast('Konkurrent fehlt', 'Bitte einen Namen oder eine Shop-URL eingeben.', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('competitorGenBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Recherchiert…';
+
+    await withActivity(async () => {
+      try {
+        let yourProductsSummary = null;
+        if (compare) {
+          // Nutzt deine echten, bereits gesyncten Shopify-Produkte für den Vergleich
+          const products = await api('/shopify/products').catch(() => []);
+          if (products.length > 0) {
+            yourProductsSummary = products
+              .slice(0, 20)
+              .map(p => `${p.title}${p.price != null ? ` (${p.price.toFixed(2)}€)` : ''}`)
+              .join(', ');
+          }
+        }
+
+        const result = await api('/ai/analyze-competitor', {
+          method: 'POST',
+          body: { competitorName, focus: focus || undefined, yourProductsSummary },
+        });
+        closeSheet();
+        toast('Analyse fertig', '', 'success');
+        navigateTo('ai');
+        setTimeout(() => showCompetitorResults(result, competitorName), 200);
+      } catch (err) {
+        toast('Analyse fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Analyse starten';
+      }
+    });
+  };
+}
+
+function showCompetitorResults(result, competitorName) {
+  const sourcesHtml = (result.sources && result.sources.length > 0)
+    ? `<div style="margin-bottom:16px">
+        <div style="font-size:11px;color:var(--ink-dim);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Quellen</div>
+        ${result.sources.map(url => `<a href="${escapeHtml(url)}" target="_blank" style="display:block;font-size:11.5px;color:var(--depth-blue);margin-bottom:4px;word-break:break-all">${escapeHtml(url)}</a>`).join('')}
+      </div>`
+    : '';
+
+  openSheet(`
+    <div class="sheet-title">Konkurrenzbeobachtung: ${escapeHtml(competitorName)}</div>
+    <div class="sheet-sub">Echte Websuche, mit Quellen zum Nachprüfen</div>
+    <div class="glass" style="padding:16px;margin-bottom:16px;font-size:13.5px;line-height:1.6;white-space:pre-wrap">${escapeHtml(result.text)}</div>
+    ${sourcesHtml}
+  `);
 }
 
 function openTrendToMarketingSheet(productId, productTitle) {
