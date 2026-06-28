@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 const TABS = [
   { id: 'dashboard', icon: '◉', label: 'Übersicht' },
+  { id: 'chat', icon: '◔', label: 'Chat' },
   { id: 'shopify', icon: '◫', label: 'Shopify' },
   { id: 'social', icon: '◈', label: 'Social' },
   { id: 'ai', icon: '✦', label: 'KI' },
@@ -24,6 +25,7 @@ function renderTabbar() {
 
 const VIEW_TITLES = {
   dashboard: ['Übersicht', 'Alles im Blick'],
+  chat: ['Chat-Assistent', 'Fragen zu deinem Shop'],
   shopify: ['Shopify', 'Produkte & Bestellungen'],
   social: ['Social Media', 'Verbindungen & Beiträge'],
   ai: ['KI-Werkzeuge', 'Echte Claude-Generierung'],
@@ -42,6 +44,7 @@ async function navigateTo(tab) {
 
   try {
     if (tab === 'dashboard') await renderDashboard(view);
+    else if (tab === 'chat') await renderChat(view);
     else if (tab === 'shopify') await renderShopify(view);
     else if (tab === 'social') await renderSocial(view);
     else if (tab === 'ai') await renderAi(view);
