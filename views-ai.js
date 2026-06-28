@@ -2,11 +2,12 @@
 // KI-VIEW
 // ═══════════════════════════════════════════════════════════
 async function renderAi(view) {
-  const [aiStatus, higgsfieldStatus, history, costStatus] = await Promise.all([
+  const [aiStatus, higgsfieldStatus, history, costStatus, weeklyTrend] = await Promise.all([
     api('/ai/status').catch(() => ({ configured: false })),
     api('/higgsfield/status').catch(() => ({ configured: false })),
     api('/ai/history').catch(() => []),
     api('/ai/cost-status').catch(() => null),
+    api('/ai/weekly-trend').catch(() => null),
   ]);
   state.aiConfigured = aiStatus.configured;
   state.higgsfieldConfigured = higgsfieldStatus.configured;
@@ -37,8 +38,16 @@ async function renderAi(view) {
       <div style="margin-top:8px; font-size:11px; color:var(--ink-dim)">Tippen, um Limit zu ändern</div>
     </div>` : '';
 
+  const weeklyTrendCardHtml = (state.aiConfigured && weeklyTrend) ? `
+    <div class="glass" id="weeklyTrendCard" style="margin-bottom:14px; padding:14px; cursor:pointer">
+      <div class="row-sub" style="margin-bottom:6px">📈 Wöchentlicher Trend-Alarm · ${formatRelativeTime(weeklyTrend.created_at)}</div>
+      <div style="font-size:13px; line-height:1.5; max-height:60px; overflow:hidden; mask-image:linear-gradient(to bottom, black 60%, transparent)">${escapeHtml(weeklyTrend.output)}</div>
+      <div style="margin-top:6px; font-size:11px; color:var(--depth-blue)">Tippen für die vollständige Analyse</div>
+    </div>` : '';
+
   view.innerHTML = `
     ${costCardHtml}
+    ${weeklyTrendCardHtml}
     ${!state.aiConfigured ? '' : `
     <div class="grid2">
       <div class="card glass" id="genDescCard">
@@ -88,6 +97,12 @@ async function renderAi(view) {
 
   const costCard = document.getElementById('costStatusCard');
   if (costCard) costCard.onclick = () => openCostLimitSheet(costStatus);
+
+  const weeklyTrendCard = document.getElementById('weeklyTrendCard');
+  if (weeklyTrendCard) weeklyTrendCard.onclick = () => showCompetitorResults(
+    { text: weeklyTrend.output, sources: [] },
+    weeklyTrend.niche ? `Trend-Alarm: ${weeklyTrend.niche}` : 'Wöchentlicher Trend-Alarm'
+  );
 
   if (state.aiConfigured) {
     document.getElementById('genDescCard').onclick = openDescriptionSheet;
