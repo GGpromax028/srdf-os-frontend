@@ -266,6 +266,9 @@ function renderMarginSection(margins, lowMargins) {
   return `
     <div class="section-h">Margenrechner (${withCost.length}/${margins.length} Produkte erfasst)</div>
     ${warningHtml}
+    <div class="glass" style="margin-bottom:10px; padding:12px">
+      <button class="btn btn-glass btn-full" id="pdfReportBtn">📄 Gewinn-Report als PDF (letzter Monat)</button>
+    </div>
     <div class="glass" style="margin-bottom:14px" id="marginsList">
       ${margins.map(m => `
         <div class="row">
@@ -291,6 +294,49 @@ function wireMarginEditButtons() {
   document.querySelectorAll('[data-edit-cost]').forEach(btn => {
     btn.onclick = () => openCostPriceSheet(btn.dataset.editCost, btn.dataset.title, btn.dataset.currentCost);
   });
+
+  const pdfBtn = document.getElementById('pdfReportBtn');
+  if (pdfBtn) pdfBtn.onclick = () => downloadProfitReportPdf(pdfBtn);
+}
+
+// Lädt den PDF-Gewinn-Report für den letzten vollen Kalendermonat
+// herunter. Wie beim Backup-Download: braucht den Auth-Header, also
+// per fetch + Blob statt direktem <a href>.
+async function downloadProfitReportPdf(btn) {
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Erstelle PDF…';
+
+  const today = new Date();
+  const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastMonthEnd = new Date(firstOfThisMonth - 1);
+  const lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
+
+  const from = lastMonthStart.toISOString().slice(0, 10);
+  const to = lastMonthEnd.toISOString().slice(0, 10);
+
+  try {
+    const res = await fetch(`${API_BASE}/stats/profit-report.pdf?from=${from}&to=${to}`, {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    if (!res.ok) throw new Error('PDF konnte nicht erstellt werden.');
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gewinn-report-${from}-bis-${to}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('PDF erstellt', '', 'success');
+  } catch (err) {
+    toast('Fehlgeschlagen', err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 }
 
 function openCostPriceSheet(shopifyId, title, currentCost) {
