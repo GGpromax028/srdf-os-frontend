@@ -2,12 +2,14 @@
 // KI-VIEW
 // ═══════════════════════════════════════════════════════════
 async function renderAi(view) {
-  const [aiStatus, higgsfieldStatus, history, costStatus, weeklyTrend] = await Promise.all([
+  const [aiStatus, higgsfieldStatus, history, costStatus, weeklyTrend, seasonalCampaigns, upcomingEvents] = await Promise.all([
     api('/ai/status').catch(() => ({ configured: false })),
     api('/higgsfield/status').catch(() => ({ configured: false })),
     api('/ai/history').catch(() => []),
     api('/ai/cost-status').catch(() => null),
     api('/ai/weekly-trend').catch(() => null),
+    api('/ai/seasonal-campaigns').catch(() => []),
+    api('/ai/upcoming-events').catch(() => []),
   ]);
   state.aiConfigured = aiStatus.configured;
   state.higgsfieldConfigured = higgsfieldStatus.configured;
@@ -45,9 +47,24 @@ async function renderAi(view) {
       <div style="margin-top:6px; font-size:11px; color:var(--depth-blue)">Tippen für die vollständige Analyse</div>
     </div>` : '';
 
+  const latestSeasonalCampaign = seasonalCampaigns[0] || null;
+  const nextEvent = upcomingEvents[0] || null;
+  const seasonalCardHtml = (state.aiConfigured && (latestSeasonalCampaign || nextEvent)) ? `
+    <div class="glass" id="seasonalCard" style="margin-bottom:14px; padding:14px; cursor:pointer">
+      ${latestSeasonalCampaign ? `
+        <div class="row-sub" style="margin-bottom:6px">🎯 ${escapeHtml(latestSeasonalCampaign.title)} · ${formatRelativeTime(latestSeasonalCampaign.created_at)}</div>
+        <div style="font-size:13px; line-height:1.5; max-height:60px; overflow:hidden; mask-image:linear-gradient(to bottom, black 60%, transparent)">${escapeHtml(latestSeasonalCampaign.output)}</div>
+        <div style="margin-top:6px; font-size:11px; color:var(--depth-blue)">Tippen für die vollständige Kampagnen-Idee</div>
+      ` : `
+        <div class="row-sub">🗓 Nächster Verkaufstermin: ${escapeHtml(nextEvent.label)}, ${formatDateDe(nextEvent.date)}</div>
+        <div style="margin-top:4px; font-size:11px; color:var(--ink-dim)">14 Tage vorher bekommst du automatisch eine konkrete Kampagnen-Idee</div>
+      `}
+    </div>` : '';
+
   view.innerHTML = `
     ${costCardHtml}
     ${weeklyTrendCardHtml}
+    ${seasonalCardHtml}
     ${!state.aiConfigured ? '' : `
     <div class="grid2">
       <div class="card glass" id="genDescCard">
@@ -103,6 +120,14 @@ async function renderAi(view) {
     { text: weeklyTrend.output, sources: [] },
     weeklyTrend.niche ? `Trend-Alarm: ${weeklyTrend.niche}` : 'Wöchentlicher Trend-Alarm'
   );
+
+  const seasonalCard = document.getElementById('seasonalCard');
+  if (seasonalCard && latestSeasonalCampaign) {
+    seasonalCard.onclick = () => showCompetitorResults(
+      { text: latestSeasonalCampaign.output, sources: [] },
+      latestSeasonalCampaign.title
+    );
+  }
 
   if (state.aiConfigured) {
     document.getElementById('genDescCard').onclick = openDescriptionSheet;
