@@ -17,6 +17,10 @@ async function renderSettings(view) {
         <div class="row-icon">⚿</div>
         <div class="row-text"><div class="row-title">Passwort ändern</div></div>
       </button>
+      <button class="row" style="width:100%;text-align:left" id="twoFactorRow">
+        <div class="row-icon">🔐</div>
+        <div class="row-text"><div class="row-title">Zwei-Faktor-Authentifizierung</div><div class="row-sub" id="twoFactorStatusSub">Lädt…</div></div>
+      </button>
       <button class="row" style="width:100%;text-align:left" id="logoutRow">
         <div class="row-icon">⏏</div>
         <div class="row-text"><div class="row-title" style="color:var(--danger)">Abmelden</div></div>
@@ -62,6 +66,8 @@ async function renderSettings(view) {
 
   renderPermsList(perms);
   document.getElementById('changePwRow').onclick = openChangePasswordSheet;
+  loadTwoFactorStatus();
+  document.getElementById('twoFactorRow').onclick = openTwoFactorSheet;
   document.getElementById('logoutRow').onclick = () => {
     openSheet(`
       <div class="sheet-title">Wirklich abmelden?</div>
@@ -370,6 +376,109 @@ function openChangePasswordSheet() {
       toast('Passwort geändert', '', 'success');
     } catch (err) {
       errEl.textContent = err.message;
+    }
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// ZWEI-FAKTOR-AUTHENTIFIZIERUNG
+// ═══════════════════════════════════════════════════════════
+async function loadTwoFactorStatus() {
+  const sub = document.getElementById('twoFactorStatusSub');
+  if (!sub) return;
+  try {
+    const status = await api('/auth/2fa/status');
+    state.twoFactorEnabled = status.enabled;
+    sub.textContent = status.enabled ? '✓ Aktiv' : 'Nicht aktiv — empfohlen';
+    sub.style.color = status.enabled ? 'var(--signal-green, #30d158)' : '';
+  } catch (err) {
+    sub.textContent = 'Status konnte nicht geladen werden';
+  }
+}
+
+function openTwoFactorSheet() {
+  if (state.twoFactorEnabled) {
+    openTwoFactorDisableSheet();
+  } else {
+    openTwoFactorSetupSheet();
+  }
+}
+
+// Schritt 1 der Einrichtung: QR-Code anzeigen, den du mit dem
+// iPhone-Schlüsselbund (Einstellungen > Passwörter > + > QR-Code
+// scannen) oder einer Authenticator-App scannst.
+async function openTwoFactorSetupSheet() {
+  openSheet(`<div class="sheet-title">2FA einrichten</div><div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`);
+
+  try {
+    const { qrCodeDataUrl, secret } = await api('/auth/2fa/setup', { method: 'POST' });
+
+    openSheet(`
+      <div class="sheet-title">2FA einrichten</div>
+      <div class="sheet-sub">Scanne diesen Code mit deinem iPhone-Schlüsselbund (Einstellungen → Passwörter → Mit Schlüsselbund einrichten → QR-Code scannen) oder einer Authenticator-App.</div>
+      <div style="text-align:center; margin:16px 0">
+        <img src="${qrCodeDataUrl}" alt="QR-Code für 2FA" style="width:200px; height:200px; border-radius:12px">
+      </div>
+      <div class="sheet-sub" style="font-size:11px; word-break:break-all; text-align:center; margin-bottom:16px">Funktioniert das Scannen nicht? Manuell eintragen: ${escapeHtml(secret)}</div>
+      <div class="field" style="margin-bottom:18px">
+        <label class="field-label">Bestätigungscode aus dem Schlüsselbund</label>
+        <input class="input" id="twoFaConfirmCode" placeholder="123456" inputmode="numeric" maxlength="6" style="text-align:center;font-size:18px;letter-spacing:3px;font-family:var(--font-mono)">
+      </div>
+      <button class="btn btn-primary btn-full" id="twoFaConfirmBtn">2FA aktivieren</button>
+      <div id="twoFaSetupError" style="color:var(--danger);font-size:12px;margin-top:10px;text-align:center"></div>
+    `);
+
+    document.getElementById('twoFaConfirmBtn').onclick = async () => {
+      const code = document.getElementById('twoFaConfirmCode').value.trim();
+      const errEl = document.getElementById('twoFaSetupError');
+      const btn = document.getElementById('twoFaConfirmBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div>';
+      try {
+        await api('/auth/2fa/confirm', { method: 'POST', body: { code } });
+        closeSheet();
+        toast('2FA aktiviert', 'Beim nächsten Login wird der Code abgefragt.', 'success');
+        loadTwoFactorStatus();
+      } catch (err) {
+        errEl.textContent = err.message;
+        btn.disabled = false;
+        btn.textContent = '2FA aktivieren';
+      }
+    };
+  } catch (err) {
+    openSheet(`<div class="sheet-title">Fehler</div><div class="sheet-sub">${escapeHtml(err.message)}</div>`);
+  }
+}
+
+// 2FA deaktivieren braucht das aktuelle Passwort zur Bestätigung -
+// sonst könnte jemand mit kurzem Geräte-Zugriff einfach deinen
+// zweiten Schutzfaktor abschalten, ohne das Passwort zu kennen.
+function openTwoFactorDisableSheet() {
+  openSheet(`
+    <div class="sheet-title">2FA deaktivieren?</div>
+    <div class="sheet-sub">Dein Konto ist dann nur noch durch dein Passwort geschützt, ohne den zweiten Faktor.</div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label">Passwort zur Bestätigung</label>
+      <input class="input" id="twoFaDisablePw" type="password" autocomplete="current-password">
+    </div>
+    <button class="btn btn-danger btn-full" id="twoFaDisableBtn" style="margin-bottom:10px">2FA deaktivieren</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('twoFaDisableBtn').onclick = async () => {
+    const password = document.getElementById('twoFaDisablePw').value;
+    const btn = document.getElementById('twoFaDisableBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      await api('/auth/2fa/disable', { method: 'POST', body: { password } });
+      closeSheet();
+      toast('2FA deaktiviert', '', 'success');
+      loadTwoFactorStatus();
+    } catch (err) {
+      toast('Fehlgeschlagen', err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '2FA deaktivieren';
     }
   };
 }
