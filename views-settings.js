@@ -21,6 +21,10 @@ async function renderSettings(view) {
         <div class="row-icon">⏏</div>
         <div class="row-text"><div class="row-title" style="color:var(--danger)">Abmelden</div></div>
       </button>
+      <button class="row" style="width:100%;text-align:left" id="invalidateAllRow">
+        <div class="row-icon">⚠</div>
+        <div class="row-text"><div class="row-title" style="color:var(--danger)">Alle Geräte abmelden</div><div class="row-sub">Notfall, z.B. bei gestohlenem Handy</div></div>
+      </button>
     </div>
 
     <div class="section-h">Verbindungsstatus</div>
@@ -64,6 +68,34 @@ async function renderSettings(view) {
       <button class="btn btn-danger btn-full" style="margin-bottom:10px" onclick="logout();closeSheet()">Ja, abmelden</button>
       <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
     `);
+  };
+  document.getElementById('invalidateAllRow').onclick = () => {
+    openSheet(`
+      <div class="sheet-title">Alle Geräte abmelden?</div>
+      <div class="sheet-sub">Jedes aktuell eingeloggte Gerät (auch dieses hier) wird sofort abgemeldet. Nutze das nur im Notfall, z.B. wenn dein Handy gestohlen wurde. Du musst dich danach selbst neu einloggen.</div>
+      <div class="field" style="margin-bottom:18px">
+        <label class="field-label">Passwort zur Bestätigung</label>
+        <input class="input" id="invalidateAllPw" type="password" autocomplete="current-password">
+      </div>
+      <button class="btn btn-danger btn-full" id="confirmInvalidateAllBtn" style="margin-bottom:10px">Ja, alle Geräte abmelden</button>
+      <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+    `);
+    document.getElementById('confirmInvalidateAllBtn').onclick = async () => {
+      const password = document.getElementById('invalidateAllPw').value;
+      const btn = document.getElementById('confirmInvalidateAllBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div>';
+      try {
+        await api('/auth/invalidate-all-sessions', { method: 'POST', body: { password } });
+        closeSheet();
+        toast('Alle Geräte abgemeldet', 'Du wirst jetzt zum Login weitergeleitet.', 'success');
+        setTimeout(() => logout(), 1200);
+      } catch (err) {
+        toast('Fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Ja, alle Geräte abmelden';
+      }
+    };
   };
   document.getElementById('systemHealthRow').onclick = openSystemHealthSheet;
   document.getElementById('backupsRow').onclick = openBackupsSheet;
