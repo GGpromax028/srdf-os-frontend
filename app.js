@@ -293,6 +293,7 @@ function renderTwoFactorPrompt(lock, preAuthToken) {
       </div>
       <button class="btn btn-primary btn-full" id="twoFaBtn">Bestätigen</button>
       <button class="btn btn-glass btn-full" id="twoFaBackBtn" style="margin-top:10px">Zurück zum Passwort</button>
+      <button class="btn-link" id="twoFaRecoveryLink" style="margin-top:14px;background:none;border:none;color:var(--depth-blue);font-size:12.5px;text-decoration:underline;cursor:pointer;display:block;width:100%;text-align:center">Schlüsselbund nicht verfügbar?</button>
       <div id="twoFaError" style="color:var(--danger);font-size:12px;margin-top:10px;text-align:center"></div>
     </div>`;
 
@@ -318,7 +319,58 @@ function renderTwoFactorPrompt(lock, preAuthToken) {
 
   document.getElementById('twoFaBtn').onclick = doVerify;
   document.getElementById('twoFaBackBtn').onclick = () => renderLogin(lock);
+  document.getElementById('twoFaRecoveryLink').onclick = () => renderRecoveryCodePrompt(lock, preAuthToken);
   document.getElementById('twoFaCode').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doVerify();
+  });
+}
+
+// Notfall-Alternative zum normalen 2FA-Code: ein einmaliger
+// Wiederherstellungscode, falls der Schlüsselbund/das iPhone nicht
+// verfügbar ist. Jeder Code funktioniert nur EIN einziges Mal.
+function renderRecoveryCodePrompt(lock, preAuthToken) {
+  lock.innerHTML = `
+    <div class="lock-icon">🗝</div>
+    <div class="lock-title">Wiederherstellungscode</div>
+    <div style="color:var(--ink-dim);font-size:13px;text-align:center;max-width:280px">
+      Gib einen deiner gesicherten Wiederherstellungscodes ein. Jeder Code funktioniert nur ein einziges Mal.
+    </div>
+    <div class="lock-card glass">
+      <div class="field" style="margin-bottom:18px">
+        <label class="field-label">Code</label>
+        <input type="text" id="recoveryCodeInput" class="input" placeholder="XXXXXX-XXXXXX" autocomplete="off" autofocus style="text-align:center;font-size:16px;letter-spacing:1px;font-family:var(--font-mono)">
+      </div>
+      <button class="btn btn-primary btn-full" id="recoveryBtn">Bestätigen</button>
+      <button class="btn btn-glass btn-full" id="recoveryBackBtn" style="margin-top:10px">Zurück zum Code aus dem Schlüsselbund</button>
+      <div id="recoveryError" style="color:var(--danger);font-size:12px;margin-top:10px;text-align:center"></div>
+    </div>`;
+
+  const doVerify = async () => {
+    const recoveryCode = document.getElementById('recoveryCodeInput').value.trim();
+    const errEl = document.getElementById('recoveryError');
+    const btn = document.getElementById('recoveryBtn');
+    errEl.textContent = '';
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+
+    try {
+      const { token, remaining } = await api('/auth/login/verify-recovery-code', { method: 'POST', body: { preAuthToken, recoveryCode } });
+      state.token = token;
+      sessionStorage.setItem('srdf_token', token);
+      showMain();
+      if (remaining <= 2) {
+        setTimeout(() => toast('Wenige Wiederherstellungscodes übrig', `Nur noch ${remaining} Code(s) übrig. Erstelle bald neue in den Einstellungen.`, 'error'), 800);
+      }
+    } catch (err) {
+      errEl.textContent = err.message;
+      btn.disabled = false;
+      btn.textContent = 'Bestätigen';
+    }
+  };
+
+  document.getElementById('recoveryBtn').onclick = doVerify;
+  document.getElementById('recoveryBackBtn').onclick = () => renderTwoFactorPrompt(lock, preAuthToken);
+  document.getElementById('recoveryCodeInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doVerify();
   });
 }
