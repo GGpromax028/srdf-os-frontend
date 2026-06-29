@@ -396,12 +396,29 @@ async function loadTwoFactorStatus() {
   }
 }
 
-function openTwoFactorSheet() {
-  if (state.twoFactorEnabled) {
-    openTwoFactorDisableSheet();
-  } else {
+async function openTwoFactorSheet() {
+  if (!state.twoFactorEnabled) {
     openTwoFactorSetupSheet();
+    return;
   }
+
+  let remaining = '…';
+  try {
+    const status = await api('/auth/2fa/recovery-codes/status');
+    remaining = status.remaining;
+  } catch {
+    remaining = '?';
+  }
+
+  openSheet(`
+    <div class="sheet-title">Zwei-Faktor-Authentifizierung</div>
+    <div class="sheet-sub">✓ Aktiv. Du hast noch ${remaining} Wiederherstellungscode(s) übrig.</div>
+    <button class="btn btn-glass btn-full" id="regenerateRecoveryBtn" style="margin-bottom:10px">Wiederherstellungscodes neu erstellen</button>
+    <button class="btn btn-danger btn-full" id="openDisable2faBtn">2FA deaktivieren</button>
+  `);
+
+  document.getElementById('regenerateRecoveryBtn').onclick = openRegenerateRecoveryCodesSheet;
+  document.getElementById('openDisable2faBtn').onclick = openTwoFactorDisableSheet;
 }
 
 // Schritt 1 der Einrichtung: QR-Code anzeigen, den du mit dem
@@ -435,10 +452,10 @@ async function openTwoFactorSetupSheet() {
       btn.disabled = true;
       btn.innerHTML = '<div class="spinner"></div>';
       try {
-        await api('/auth/2fa/confirm', { method: 'POST', body: { code } });
-        closeSheet();
-        toast('2FA aktiviert', 'Beim nächsten Login wird der Code abgefragt.', 'success');
+        const { recoveryCodes } = await api('/auth/2fa/confirm', { method: 'POST', body: { code } });
+        toast('2FA aktiviert', '', 'success');
         loadTwoFactorStatus();
+        showRecoveryCodesSheet(recoveryCodes, { isFirstTime: true });
       } catch (err) {
         errEl.textContent = err.message;
         btn.disabled = false;
@@ -479,6 +496,68 @@ function openTwoFactorDisableSheet() {
       toast('Fehlgeschlagen', err.message, 'error');
       btn.disabled = false;
       btn.textContent = '2FA deaktivieren';
+    }
+  };
+}
+
+// Neue Codes erzeugen - macht alle bisherigen sofort ungültig.
+// Braucht das Passwort, genau wie das Deaktivieren von 2FA.
+function openRegenerateRecoveryCodesSheet() {
+  openSheet(`
+    <div class="sheet-title">Neue Wiederherstellungscodes</div>
+    <div class="sheet-sub">Alle bisherigen Codes werden dadurch sofort ungültig. Du bekommst 8 neue Codes, die du dir sicher aufschreiben solltest.</div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label">Passwort zur Bestätigung</label>
+      <input class="input" id="regenRecoveryPw" type="password" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary btn-full" id="regenRecoveryBtn">Neue Codes erstellen</button>
+  `);
+
+  document.getElementById('regenRecoveryBtn').onclick = async () => {
+    const password = document.getElementById('regenRecoveryPw').value;
+    const btn = document.getElementById('regenRecoveryBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      const { recoveryCodes } = await api('/auth/2fa/recovery-codes/regenerate', { method: 'POST', body: { password } });
+      showRecoveryCodesSheet(recoveryCodes, { isFirstTime: false });
+    } catch (err) {
+      toast('Fehlgeschlagen', err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Neue Codes erstellen';
+    }
+  };
+}
+
+// Zeigt die Codes EINMALIG im Klartext, mit Kopier-Möglichkeit.
+// Danach gibt es keine Möglichkeit mehr, sie erneut anzusehen -
+// nur durch Neu-Erstellen (was die alten ungültig macht).
+function showRecoveryCodesSheet(codes, { isFirstTime }) {
+  openSheet(`
+    <div class="sheet-title">Deine Wiederherstellungscodes</div>
+    <div class="sheet-sub" style="color:var(--danger)">Wichtig: Diese Codes werden nur JETZT angezeigt. Schreib sie dir an einem sicheren Ort auf (z.B. Passwort-Manager oder Papier) — danach kannst du sie nicht mehr ansehen.</div>
+    <div class="glass" style="padding:14px; margin:14px 0; font-family:var(--font-mono); font-size:14px; line-height:1.9; text-align:center">
+      ${codes.map(c => escapeHtml(c)).join('<br>')}
+    </div>
+    <button class="btn btn-glass btn-full" id="copyRecoveryCodesBtn" style="margin-bottom:10px">In Zwischenablage kopieren</button>
+    <button class="btn btn-primary btn-full" id="recoveryDoneBtn">${isFirstTime ? 'Ich habe sie gesichert' : 'Fertig'}</button>
+  `);
+
+  document.getElementById('copyRecoveryCodesBtn').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(codes.join('\n'));
+      toast('Kopiert', 'In die Zwischenablage kopiert.', 'success');
+    } catch {
+      toast('Kopieren nicht möglich', 'Bitte die Codes manuell abschreiben.', 'error');
+    }
+  };
+
+  document.getElementById('recoveryDoneBtn').onclick = () => {
+    closeSheet();
+    if (isFirstTime) {
+      toast('2FA aktiviert', 'Beim nächsten Login wird der Code abgefragt.', 'success');
+    } else {
+      toast('Neue Codes gespeichert', 'Alte Codes sind jetzt ungültig.', 'success');
     }
   };
 }
