@@ -20,6 +20,7 @@ const state = {
   instagramConfigured: false,
   higgsfieldConfigured: false,
   backgroundActive: false,
+  twoFactorEnabled: false,
 };
 
 // ── Hilfsfunktion: fetch mit Timeout ──
@@ -237,7 +238,7 @@ function renderLogin(lock) {
     <div class="lock-card glass">
       <div class="field" style="margin-bottom:18px">
         <label class="field-label">Passwort</label>
-        <input type="password" id="loginPw" class="input" placeholder="••••••••••" autofocus>
+        <input type="password" id="loginPw" class="input" placeholder="••••••••••" autofocus autocomplete="current-password">
       </div>
       <button class="btn btn-primary btn-full" id="loginBtn">Entsperren</button>
       <div id="loginError" style="color:var(--danger);font-size:12px;margin-top:10px;text-align:center"></div>
@@ -252,9 +253,13 @@ function renderLogin(lock) {
     btn.innerHTML = '<div class="spinner"></div>';
 
     try {
-      const { token } = await api('/auth/login', { method: 'POST', body: { password: pw } });
-      state.token = token;
-      sessionStorage.setItem('srdf_token', token);
+      const result = await api('/auth/login', { method: 'POST', body: { password: pw } });
+      if (result.requiresTwoFactor) {
+        renderTwoFactorPrompt(lock, result.preAuthToken);
+        return;
+      }
+      state.token = result.token;
+      sessionStorage.setItem('srdf_token', result.token);
       showMain();
     } catch (err) {
       errEl.textContent = err.message;
@@ -266,6 +271,55 @@ function renderLogin(lock) {
   document.getElementById('loginBtn').onclick = doLogin;
   document.getElementById('loginPw').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doLogin();
+  });
+}
+
+// Zweiter Login-Schritt, nur wenn 2FA aktiv ist: Passwort war schon
+// korrekt (Schritt 1), jetzt fehlt noch der 6-stellige Code aus dem
+// Schlüsselbund/Authenticator. Wichtig: hier gibt es noch KEIN
+// volles Session-Token - das passiert erst nach erfolgreicher
+// Code-Prüfung in verifyTwoFactorLogin auf dem Server.
+function renderTwoFactorPrompt(lock, preAuthToken) {
+  lock.innerHTML = `
+    <div class="lock-icon">🔐</div>
+    <div class="lock-title">Bestätigungscode</div>
+    <div style="color:var(--ink-dim);font-size:13px;text-align:center;max-width:280px">
+      Öffne deinen Schlüsselbund/Authenticator und gib den aktuellen 6-stelligen Code ein.
+    </div>
+    <div class="lock-card glass">
+      <div class="field" style="margin-bottom:18px">
+        <label class="field-label">Code</label>
+        <input type="text" id="twoFaCode" class="input" placeholder="123456" inputmode="numeric" maxlength="6" autocomplete="one-time-code" autofocus style="text-align:center;font-size:20px;letter-spacing:4px;font-family:var(--font-mono)">
+      </div>
+      <button class="btn btn-primary btn-full" id="twoFaBtn">Bestätigen</button>
+      <button class="btn btn-glass btn-full" id="twoFaBackBtn" style="margin-top:10px">Zurück zum Passwort</button>
+      <div id="twoFaError" style="color:var(--danger);font-size:12px;margin-top:10px;text-align:center"></div>
+    </div>`;
+
+  const doVerify = async () => {
+    const code = document.getElementById('twoFaCode').value.trim();
+    const errEl = document.getElementById('twoFaError');
+    const btn = document.getElementById('twoFaBtn');
+    errEl.textContent = '';
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+
+    try {
+      const { token } = await api('/auth/login/verify-2fa', { method: 'POST', body: { preAuthToken, code } });
+      state.token = token;
+      sessionStorage.setItem('srdf_token', token);
+      showMain();
+    } catch (err) {
+      errEl.textContent = err.message;
+      btn.disabled = false;
+      btn.textContent = 'Bestätigen';
+    }
+  };
+
+  document.getElementById('twoFaBtn').onclick = doVerify;
+  document.getElementById('twoFaBackBtn').onclick = () => renderLogin(lock);
+  document.getElementById('twoFaCode').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doVerify();
   });
 }
 
