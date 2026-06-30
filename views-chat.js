@@ -156,6 +156,18 @@ async function sendChatMessageUi(input, sendBtn) {
     const result = await api('/chat/message', { method: 'POST', body: { message } });
     document.getElementById(thinkingId)?.remove();
     container.insertAdjacentHTML('beforeend', renderChatBubble({ role: 'assistant', content: result.reply }));
+
+    // Sichtbarer Hinweis, wenn wirklich etwas in der App passiert ist
+    // (Entwurf angelegt) - nicht nur Text generiert wurde.
+    const draftToolsUsed = (result.toolsUsed || []).filter(t => t === 'create_social_draft');
+    if (draftToolsUsed.length > 0) {
+      container.insertAdjacentHTML('beforeend', `
+        <div style="display:flex; justify-content:flex-start">
+          <div class="glass" style="padding:8px 12px; border-radius:10px; font-size:11.5px; color:var(--depth-blue)">
+            ✓ ${draftToolsUsed.length} Entwurf${draftToolsUsed.length > 1 ? 'e' : ''} im Social-Tab gespeichert
+          </div>
+        </div>`);
+    }
     scrollChatToBottom();
   } catch (err) {
     document.getElementById(thinkingId)?.remove();
