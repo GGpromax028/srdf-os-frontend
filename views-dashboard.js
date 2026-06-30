@@ -58,11 +58,12 @@ async function navigateTo(tab) {
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
 async function renderDashboard(view) {
-  const [posts, history, lowStock, dailyReport] = await Promise.all([
+  const [posts, history, lowStock, dailyReport, briefing] = await Promise.all([
     api('/social/posts').catch(() => []),
     api('/ai/history').catch(() => []),
     api('/stats/low-stock').catch(() => []),
     api('/ai/daily-report').catch(() => null),
+    api('/ai/briefing').catch(() => null),
   ]);
 
   const pendingPosts = posts.filter(p => p.status === 'draft' || p.status === 'scheduled');
@@ -91,6 +92,22 @@ async function renderDashboard(view) {
     headline = 'Alles läuft reibungslos. Kein Handlungsbedarf.';
     badgeKind = 'green'; badgeText = 'Im grünen Bereich';
   }
+
+  const briefingHtml = state.aiConfigured ? `
+    <div class="glass fade-up" style="margin-bottom:14px; padding:16px; background:linear-gradient(135deg, rgba(255,159,10,.08), rgba(10,132,255,.08))">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px">
+        <span style="font-size:18px">☀️</span>
+        <span style="font-weight:600; font-size:14px">Morgen-Briefing</span>
+      </div>
+      ${briefing ? `
+        <div class="row-sub" style="margin-bottom:8px">Erstellt ${formatRelativeTime(briefing.created_at)}</div>
+        <div style="white-space:pre-wrap; line-height:1.5; font-size:14px">${escapeHtml(briefing.output)}</div>
+        <button class="btn btn-ghost" id="regenBriefing" style="margin-top:10px; font-size:13px">Neu erstellen</button>
+      ` : `
+        <div class="empty-sub" style="margin-bottom:10px">Noch kein Briefing vorhanden. Läuft automatisch jeden Morgen um 7:15 Uhr — oder jetzt manuell erstellen:</div>
+        <button class="btn btn-primary" id="regenBriefing">Briefing jetzt erstellen</button>
+      `}
+    </div>` : '';
 
   const dailyReportHtml = state.aiConfigured ? `
     <div class="section-h">Tages-Report</div>
@@ -122,6 +139,7 @@ async function renderDashboard(view) {
     </div>` : '';
 
   view.innerHTML = `
+    ${briefingHtml}
     <div class="vital-card glass fade-up">
       <div class="vital-top">
         <div>
@@ -172,6 +190,22 @@ async function renderDashboard(view) {
         toast('Report konnte nicht erstellt werden', err.message, 'error');
         regenBtn.disabled = false;
         regenBtn.textContent = 'Erneut versuchen';
+      }
+    };
+  }
+
+  const regenBriefingBtn = document.getElementById('regenBriefing');
+  if (regenBriefingBtn) {
+    regenBriefingBtn.onclick = async () => {
+      regenBriefingBtn.disabled = true;
+      regenBriefingBtn.textContent = 'Erstelle...';
+      try {
+        await api('/ai/briefing/generate', { method: 'POST' });
+        await renderDashboard(view);
+      } catch (err) {
+        toast('Briefing konnte nicht erstellt werden', err.message, 'error');
+        regenBriefingBtn.disabled = false;
+        regenBriefingBtn.textContent = 'Erneut versuchen';
       }
     };
   }
