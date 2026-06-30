@@ -572,8 +572,30 @@ setInterval(() => {
   fetch(healthUrl).catch(() => {});
 }, 4 * 60 * 1000);
 
+// Service Worker registrieren UND aktiv auf Updates prüfen.
+// Browser prüfen sw.js normalerweise nur "irgendwann" im Hintergrund
+// auf Änderungen - das hat dazu geführt, dass nach Code-Updates im
+// normalen Browser-Tab teils noch tagelang die ALTE app.js aus dem
+// Cache ausgeliefert wurde. Mit reg.update() + dem controllerchange-
+// Listener bekommst du Fixes garantiert beim nächsten Laden der Seite.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+      reg.update(); // sofort aktiv nach neuen sw.js-Inhalten fragen, statt zu warten
+
+      // Sobald ein neuer Service Worker übernimmt (= neue Version ist
+      // bereit), die Seite einmal automatisch neu laden, damit der
+      // frische Code wirklich greift, statt dass man es nicht merkt.
+      let hasReloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hasReloaded) return; // Sicherheitsnetz gegen eine Reload-Schleife
+        hasReloaded = true;
+        location.reload();
+      });
+    } catch {
+      // Service Worker ist optional (nur fürs Offline-/Installier-Verhalten) -
+      // ein Fehler hier darf die App selbst nicht beeinträchtigen.
+    }
   });
 }
