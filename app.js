@@ -60,7 +60,13 @@ async function api(path, { method = 'GET', body } = {}) {
   const data = isJson ? await res.json() : null;
 
   if (!res.ok) {
-    if (res.status === 401) {
+    // Nur automatisch ausloggen, wenn wir VORHER eingeloggt waren (echtes
+    // Token, das jetzt abgelehnt wird - z.B. abgelaufen oder durch "Alle
+    // Geräte abmelden" invalidiert). Beim Login-Versuch selbst (z.B.
+    // falsches Passwort oder falscher 2FA-Code) gibt es noch gar kein
+    // Token - hier würde logout() fälschlich den Login-Flow zurücksetzen,
+    // noch bevor die Fehlermeldung überhaupt angezeigt werden kann.
+    if (res.status === 401 && state.token) {
       logout();
     }
     throw new Error(data?.error || `Fehler ${res.status}`);
