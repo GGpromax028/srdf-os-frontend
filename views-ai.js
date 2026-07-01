@@ -92,6 +92,11 @@ async function renderAi(view) {
       <span class="card-icon">🔍</span>
       <div class="card-title">Konkurrenzbeobachtung</div>
       <div class="card-sub">Echte Websuche zu einem Konkurrenten: Preise, Sortiment, Lücken</div>
+    </div>
+    <div class="card glass" id="genDropshipCard" style="margin-bottom:14px">
+      <span class="card-icon">📦</span>
+      <div class="card-title">Produktrecherche</div>
+      <div class="card-sub">Lohnt sich diese Produktidee? Nachfrage, Konkurrenzpreise, Marge in einer Analyse</div>
     </div>`}
 
     ${!state.higgsfieldConfigured ? `
@@ -135,6 +140,7 @@ async function renderAi(view) {
     document.getElementById('genAnalysisCard').onclick = runSalesAnalysis;
     document.getElementById('genTrendsCard').onclick = openTrendResearchSheet;
     document.getElementById('genCompetitorCard').onclick = openCompetitorAnalysisSheet;
+    document.getElementById('genDropshipCard').onclick = openDropshippingAnalysisSheet;
   }
   if (state.higgsfieldConfigured) {
     document.getElementById('genVideoCard').onclick = openVideoGenerationSheet;
@@ -519,6 +525,57 @@ function openCompetitorAnalysisSheet() {
         toast('Analyse fertig', '', 'success');
         navigateTo('ai');
         setTimeout(() => showCompetitorResults(result, competitorName), 200);
+      } catch (err) {
+        toast('Analyse fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Analyse starten';
+      }
+    });
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// PRODUKTRECHERCHE-ASSISTENT · Dropshipping-Eignungscheck
+// ═══════════════════════════════════════════════════════════
+function openDropshippingAnalysisSheet() {
+  openSheet(`
+    <div class="sheet-title">Produktrecherche</div>
+    <div class="sheet-sub">Echte Websuche über Claude: Nachfrage, Konkurrenzpreise und geschätzte Marge in einer Analyse — für die Frage "lohnt sich dieses Produkt?"</div>
+    <div class="field">
+      <label class="field-label">Produktidee</label>
+      <input class="input" id="dropshipIdea" placeholder="z.B. LED-Nachtlicht mit Bewegungssensor">
+    </div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label">Geschätzter Einkaufspreis beim Lieferanten (optional, in €)</label>
+      <input class="input" id="dropshipCost" type="number" min="0" step="0.01" placeholder="z.B. 4.50">
+    </div>
+    <button class="btn btn-primary btn-full" id="dropshipGenBtn">Analyse starten</button>
+    <div style="font-size:11px;color:var(--ink-dim);margin-top:10px;text-align:center">Hinweis: Websuche muss zusätzlich in deiner Anthropic Console aktiviert sein.</div>
+  `);
+
+  document.getElementById('dropshipGenBtn').onclick = async () => {
+    const productIdea = document.getElementById('dropshipIdea').value.trim();
+    const estimatedSupplierCost = document.getElementById('dropshipCost').value.trim();
+
+    if (!productIdea) {
+      toast('Produktidee fehlt', 'Bitte eine Produktidee eingeben.', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('dropshipGenBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Recherchiert…';
+
+    await withActivity(async () => {
+      try {
+        const result = await api('/ai/analyze-dropshipping-product', {
+          method: 'POST',
+          body: { productIdea, estimatedSupplierCost: estimatedSupplierCost || undefined },
+        });
+        closeSheet();
+        toast('Analyse fertig', '', 'success');
+        navigateTo('ai');
+        setTimeout(() => showCompetitorResults(result, `Produktrecherche: ${productIdea}`), 200);
       } catch (err) {
         toast('Analyse fehlgeschlagen', err.message, 'error');
         btn.disabled = false;
