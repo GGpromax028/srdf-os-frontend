@@ -2,10 +2,15 @@
 // SHOPIFY-VIEW
 // ═══════════════════════════════════════════════════════════
 async function renderShopify(view) {
-  if (!state.shopifyConfigured) {
+  // Demo-Status separat prüfen, BEVOR wir wegen fehlender echter
+  // Shopify-Verbindung abbrechen - Demo-Daten sollen gerade dann
+  // nutzbar sein, wenn noch keine echten Zugangsdaten eingetragen sind.
+  const demoStatus = await api('/demo/status').catch(() => ({ loaded: false }));
+
+  if (!state.shopifyConfigured && !demoStatus.loaded) {
     view.innerHTML = notConfiguredCard(
       'Shopify ist noch nicht verbunden',
-      'Trage SHOPIFY_STORE_DOMAIN und SHOPIFY_ADMIN_ACCESS_TOKEN in die .env-Datei des Backends ein. Anleitung steht in der README.'
+      'Trage SHOPIFY_STORE_DOMAIN und SHOPIFY_ADMIN_ACCESS_TOKEN in die .env-Datei des Backends ein, oder lade dir in den Einstellungen Demo-Daten zum Ausprobieren.'
     );
     return;
   }
@@ -18,7 +23,14 @@ async function renderShopify(view) {
     api('/stats/margins/low').catch(() => []),
   ]);
 
+  const demoBannerHtml = demoStatus.loaded ? `
+    <div class="glass" style="margin-bottom:14px; padding:10px 14px; border:1px solid rgba(255,159,10,.3); display:flex; align-items:center; gap:8px">
+      <span>🧪</span>
+      <span style="font-size:12.5px; color:var(--signal-amber)">Demo-Daten aktiv — das sind Testwerte, keine echten Zahlen.</span>
+    </div>` : '';
+
   view.innerHTML = `
+    ${demoBannerHtml}
     <div class="grid2">
       <button class="btn btn-glass btn-full" id="syncProductsBtn">↻ Produkte syncen</button>
       <button class="btn btn-glass btn-full" id="syncOrdersBtn">↻ Bestellungen syncen</button>
