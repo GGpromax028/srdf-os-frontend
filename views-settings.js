@@ -681,10 +681,21 @@ if ('serviceWorker' in navigator) {
       // Sobald ein neuer Service Worker übernimmt (= neue Version ist
       // bereit), die Seite einmal automatisch neu laden, damit der
       // frische Code wirklich greift, statt dass man es nicht merkt.
-      let hasReloaded = false;
+      //
+      // WICHTIG: sessionStorage statt einer lokalen Variable, weil
+      // location.reload() das komplette Skript neu lädt - eine lokale
+      // Variable würde sich dabei jedes Mal zurücksetzen und könnte so
+      // eine Reload-Schleife NICHT verhindern, wenn controllerchange aus
+      // irgendeinem Grund mehrfach über verschiedene Seitenladungen
+      // hinweg feuert (z.B. während eines instabilen Deployments).
+      // Zusätzlich: Zeitstempel statt nur einem Flag, damit sich der
+      // Schutz nach einer Minute von selbst zurücksetzt - ein ECHTES,
+      // neues Update soll nicht dauerhaft blockiert bleiben.
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (hasReloaded) return; // Sicherheitsnetz gegen eine Reload-Schleife
-        hasReloaded = true;
+        const lastReload = Number(sessionStorage.getItem('srdf_sw_reload_at') || 0);
+        const now = Date.now();
+        if (now - lastReload < 60000) return; // schon kürzlich neu geladen - keine Schleife
+        sessionStorage.setItem('srdf_sw_reload_at', String(now));
         location.reload();
       });
     } catch {
