@@ -21,6 +21,7 @@ const state = {
   higgsfieldConfigured: false,
   backgroundActive: false,
   twoFactorEnabled: false,
+  demoDataLoaded: false,
 };
 
 // ── Hilfsfunktion: fetch mit Timeout ──
