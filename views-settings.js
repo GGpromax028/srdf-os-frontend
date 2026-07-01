@@ -39,6 +39,19 @@ async function renderSettings(view) {
       <div class="row"><div class="row-icon">◈</div><div class="row-text"><div class="row-title">Instagram</div></div>${statusBadgeFor(state.instagramConfigured)}</div>
     </div>
 
+    <div class="section-h">Test-Modus</div>
+    <div class="glass" style="border:1px solid rgba(255,159,10,.3)">
+      <div style="padding:14px">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px">
+          <span style="font-size:16px">🧪</span>
+          <span style="font-weight:600; font-size:14px">Demo-Daten</span>
+          <span id="demoStatusBadge" class="badge badge-gray" style="margin-left:auto">Lädt…</span>
+        </div>
+        <div class="row-sub" style="margin-bottom:12px">Realistische Test-Produkte und -Bestellungen, um die App komplett auszuprobieren, bevor du echte Shopify-Zugangsdaten einträgst. Jederzeit rückstandsfrei entfernbar, beeinflusst nie echte Daten.</div>
+        <button class="btn btn-primary btn-full" id="demoToggleBtn">Lädt…</button>
+      </div>
+    </div>
+
     <div class="section-h">System &amp; Datenschutz</div>
     <div class="glass">
       <button class="row" style="width:100%;text-align:left" id="systemHealthRow">
@@ -66,6 +79,7 @@ async function renderSettings(view) {
 
   renderPermsList(perms);
   document.getElementById('changePwRow').onclick = openChangePasswordSheet;
+  loadDemoStatus();
   loadTwoFactorStatus();
   document.getElementById('twoFactorRow').onclick = openTwoFactorSheet;
   document.getElementById('logoutRow').onclick = () => {
@@ -558,6 +572,86 @@ function showRecoveryCodesSheet(codes, { isFirstTime }) {
       toast('2FA aktiviert', 'Beim nächsten Login wird der Code abgefragt.', 'success');
     } else {
       toast('Neue Codes gespeichert', 'Alte Codes sind jetzt ungültig.', 'success');
+    }
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// DEMO-MODUS · Test-Daten laden/entfernen
+// ═══════════════════════════════════════════════════════════
+async function loadDemoStatus() {
+  const badge = document.getElementById('demoStatusBadge');
+  const btn = document.getElementById('demoToggleBtn');
+  if (!badge || !btn) return;
+
+  try {
+    const { loaded } = await api('/demo/status');
+    state.demoDataLoaded = loaded;
+
+    if (loaded) {
+      badge.textContent = 'Aktiv';
+      badge.className = 'badge badge-amber';
+      btn.textContent = 'Demo-Daten entfernen';
+      btn.className = 'btn btn-danger btn-full';
+      btn.onclick = confirmClearDemoData;
+    } else {
+      badge.textContent = 'Inaktiv';
+      badge.className = 'badge badge-gray';
+      btn.textContent = 'Demo-Daten laden';
+      btn.className = 'btn btn-primary btn-full';
+      btn.onclick = confirmLoadDemoData;
+    }
+  } catch (err) {
+    badge.textContent = 'Fehler';
+  }
+}
+
+function confirmLoadDemoData() {
+  openSheet(`
+    <div class="sheet-title">Demo-Daten laden?</div>
+    <div class="sheet-sub">6 Test-Produkte und 25 Test-Bestellungen der letzten 60 Tage werden angelegt, damit du Margenrechner, Dashboard, PDF-Reports und den Chat-Assistenten mit echten Zahlen ausprobieren kannst. Deutlich als Demo markiert, jederzeit rückstandsfrei entfernbar.</div>
+    <button class="btn btn-primary btn-full" id="confirmLoadDemoBtn" style="margin-bottom:10px">Ja, Demo-Daten laden</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmLoadDemoBtn').onclick = async () => {
+    const btn = document.getElementById('confirmLoadDemoBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      await api('/demo/load', { method: 'POST' });
+      closeSheet();
+      toast('Demo-Daten geladen', 'Schau dir Shopify-Tab und Dashboard an.', 'success');
+      loadDemoStatus();
+    } catch (err) {
+      toast('Fehlgeschlagen', err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Ja, Demo-Daten laden';
+    }
+  };
+}
+
+function confirmClearDemoData() {
+  openSheet(`
+    <div class="sheet-title">Demo-Daten entfernen?</div>
+    <div class="sheet-sub">Alle Test-Produkte und Test-Bestellungen werden gelöscht. Echte Daten (sobald du welche hast) sind davon nie betroffen.</div>
+    <button class="btn btn-danger btn-full" id="confirmClearDemoBtn" style="margin-bottom:10px">Ja, Demo-Daten entfernen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmClearDemoBtn').onclick = async () => {
+    const btn = document.getElementById('confirmClearDemoBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      await api('/demo/clear', { method: 'POST' });
+      closeSheet();
+      toast('Demo-Daten entfernt', '', 'success');
+      loadDemoStatus();
+    } catch (err) {
+      toast('Fehlgeschlagen', err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Ja, Demo-Daten entfernen';
     }
   };
 }
