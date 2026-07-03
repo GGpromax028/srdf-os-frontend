@@ -2,7 +2,7 @@
 // KI-VIEW
 // ═══════════════════════════════════════════════════════════
 async function renderAi(view) {
-  const [aiStatus, higgsfieldStatus, history, costStatus, weeklyTrend, seasonalCampaigns, upcomingEvents] = await Promise.all([
+  const [aiStatus, higgsfieldStatus, history, costStatus, weeklyTrend, seasonalCampaigns, upcomingEvents, newsletterStats] = await Promise.all([
     api('/ai/status').catch(() => ({ configured: false })),
     api('/higgsfield/status').catch(() => ({ configured: false })),
     api('/ai/history').catch(() => []),
@@ -10,6 +10,7 @@ async function renderAi(view) {
     api('/ai/weekly-trend').catch(() => null),
     api('/ai/seasonal-campaigns').catch(() => []),
     api('/ai/upcoming-events').catch(() => []),
+    api('/newsletter/stats').catch(() => null),
   ]);
   state.aiConfigured = aiStatus.configured;
   state.higgsfieldConfigured = higgsfieldStatus.configured;
@@ -99,6 +100,18 @@ async function renderAi(view) {
       <div class="card-sub">Lohnt sich diese Produktidee? Nachfrage, Konkurrenzpreise, Marge in einer Analyse</div>
     </div>`}
 
+    <div class="section-h">Newsletter</div>
+    <div class="glass" style="margin-bottom:14px; padding:14px">
+      ${newsletterStats ? `
+        <div style="margin-bottom:12px">
+          <div style="font-size:20px; font-weight:700">${newsletterStats.confirmed}</div>
+          <div class="row-sub">Bestätigte Abonnenten (direkt aus Shopify)</div>
+        </div>
+      ` : '<div class="row-sub" style="margin-bottom:12px">Statistik konnte nicht geladen werden — prüfe, ob Shopify verbunden ist</div>'}
+      <div class="row-sub" style="margin-bottom:12px; font-size:11.5px">Die Anmeldung läuft über dein Shopify-Newsletter-Formular im Shop selbst — diese App liest die bestätigten Abonnenten nur aus und versendet Kampagnen.</div>
+      ${state.aiConfigured ? '<button class="btn btn-primary btn-full" id="newNewsletterCampaign">Neue Kampagne erstellen</button>' : ''}
+    </div>
+
     ${!state.higgsfieldConfigured ? `
     <div class="empty glass" style="margin-bottom:14px">
       <div class="empty-icon">▶</div>
@@ -142,6 +155,10 @@ async function renderAi(view) {
     document.getElementById('genCompetitorCard').onclick = openCompetitorAnalysisSheet;
     document.getElementById('genDropshipCard').onclick = openDropshippingAnalysisSheet;
   }
+
+  const newCampaignBtn = document.getElementById('newNewsletterCampaign');
+  if (newCampaignBtn) newCampaignBtn.onclick = openNewsletterCampaignSheet;
+
   if (state.higgsfieldConfigured) {
     document.getElementById('genVideoCard').onclick = openVideoGenerationSheet;
   }
@@ -582,6 +599,100 @@ function openDropshippingAnalysisSheet() {
         btn.textContent = 'Analyse starten';
       }
     });
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// NEWSLETTER
+// ═══════════════════════════════════════════════════════════
+function openNewsletterCampaignSheet() {
+  openSheet(`
+    <div class="sheet-title">Newsletter-Kampagne</div>
+    <div class="sheet-sub">KI generiert Betreff und Text. Geht NICHT automatisch raus — du bestätigst den Versand im nächsten Schritt.</div>
+    <div class="field">
+      <label class="field-label">Thema</label>
+      <input class="input" id="campaignTopic" placeholder="z.B. Neue Sommerkollektion, 20% Rabattaktion">
+    </div>
+    <div class="field" style="margin-bottom:18px">
+      <label class="field-label" style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="campaignProductsToggle" checked style="width:auto">
+        Meine echten Shopify-Produkte einbeziehen
+      </label>
+    </div>
+    <button class="btn btn-primary btn-full" id="campaignGenBtn">Kampagne generieren</button>
+  `);
+
+  document.getElementById('campaignGenBtn').onclick = async () => {
+    const topic = document.getElementById('campaignTopic').value.trim();
+    const useProducts = document.getElementById('campaignProductsToggle').checked;
+    if (!topic) { toast('Thema fehlt', '', 'error'); return; }
+
+    const btn = document.getElementById('campaignGenBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+
+    await withActivity(async () => {
+      try {
+        let productsSummary = null;
+        if (useProducts) {
+          const products = await api('/shopify/products').catch(() => []);
+          if (products.length > 0) {
+            productsSummary = products.slice(0, 15).map(p => p.title).join(', ');
+          }
+        }
+
+        const result = await api('/newsletter/campaigns/generate', {
+          method: 'POST',
+          body: { topic, productsSummary },
+        });
+        closeSheet();
+        setTimeout(() => showCampaignPreview(result), 200);
+      } catch (err) {
+        toast('Fehlgeschlagen', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Kampagne generieren';
+      }
+    });
+  };
+}
+
+function showCampaignPreview(campaign) {
+  openSheet(`
+    <div class="sheet-title">Kampagne bereit</div>
+    <div class="sheet-sub">Prüfe den Text, bevor du ihn an alle bestätigten Abonnenten versendest.</div>
+    <div class="glass" style="padding:14px; margin-bottom:16px">
+      <div style="font-weight:600; margin-bottom:8px">${escapeHtml(campaign.subject)}</div>
+      <div style="font-size:13.5px; line-height:1.6; white-space:pre-wrap">${escapeHtml(campaign.body)}</div>
+    </div>
+    <button class="btn btn-primary btn-full" id="sendCampaignBtn" style="margin-bottom:10px">Jetzt an alle Abonnenten senden</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Später (bleibt als Entwurf)</button>
+  `);
+
+  document.getElementById('sendCampaignBtn').onclick = () => confirmSendCampaign(campaign.campaignId);
+}
+
+function confirmSendCampaign(campaignId) {
+  openSheet(`
+    <div class="sheet-title">Wirklich jetzt versenden?</div>
+    <div class="sheet-sub">Die E-Mail geht an ALLE bestätigten Newsletter-Abonnenten. Das lässt sich danach nicht zurücknehmen.</div>
+    <button class="btn btn-primary btn-full" id="confirmSendBtn" style="margin-bottom:10px">Ja, jetzt senden</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmSendBtn').onclick = async () => {
+    const btn = document.getElementById('confirmSendBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      const result = await api(`/newsletter/campaigns/${campaignId}/send`, { method: 'POST' });
+      closeSheet();
+      toast('Kampagne versendet', `An ${result.sentCount} von ${result.totalSubscribers} Abonnenten`, 'success');
+      navigateTo('ai');
+    } catch (err) {
+      toast('Versand fehlgeschlagen', err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Ja, jetzt senden';
+    }
   };
 }
 
