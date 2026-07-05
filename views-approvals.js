@@ -143,36 +143,29 @@ async function renderApprovals(view) {
       <div class="row-sub" style="padding:10px 14px 4px">Ziel-Marge: ${priceSuggestions[0].targetMarginPct}%. Vorgeschlagen wird der kleinste Preis, der sie erreicht. Übernahme schreibt den Preis direkt in Shopify.</div>
     </div>` : '';
 
-  // ── Website & SEO (Storefront-Studio · Vorher/Nachher) ──
-  // Verbessert deine echte Shopify-Seite. "Übernehmen" schreibt die
-  // SEO-Metadaten direkt nach Shopify - immer erst nach Bestätigung.
-  const seoHtml = storefrontSuggestions.length ? `
-    <div class="section-h">Website &amp; SEO</div>
+  // ── Storefront-Studio (deine Shopify-Seite verbessern) ──
+  // Zeigt je nach Vorschlagstyp die passende Vorher/Nachher-Ansicht.
+  // "Übernehmen" schreibt echt nach Shopify - immer erst nach Bestätigung.
+  const studioTriggersHtml = `
+    <div class="glass fade-up" style="padding:14px;margin-bottom:14px">
+      <div class="vital-label" style="margin-bottom:2px">Storefront-Studio</div>
+      <div style="font-weight:600;font-size:14px;margin-bottom:3px">Deine Shopify-Seite verbessern</div>
+      <div class="row-sub" style="margin-bottom:11px">Vorschläge erzeugen – nichts geht live ohne deine Freigabe.</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap">
+        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:120px" data-studio="seo">SEO-Vorschläge</button>
+        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:120px" data-studio="curation">Schaufenster prüfen</button>
+        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:120px" data-studio="content">Seiten &amp; Blog</button>
+      </div>
+    </div>`;
+
+  const studioListHtml = storefrontSuggestions.length ? `
+    <div class="section-h">Website-Vorschläge</div>
     <div class="glass" style="margin-bottom:14px">
-      ${storefrontSuggestions.map(s => {
-        const t = (s.suggested && s.suggested.title) || '';
-        const d = (s.suggested && s.suggested.description) || '';
-        return `
-        <div class="row" style="align-items:flex-start">
-          <div class="row-icon" style="color:var(--signal-amber);margin-top:2px">🔍</div>
-          <div class="row-text">
-            <div class="row-title">${escapeHtml(s.productTitle || 'Produkt')}${s.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
-            <div class="row-sub" style="margin-top:3px">${escapeHtml(s.reason || 'SEO-Vorschlag')}</div>
-            <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px">
-              <div style="font-size:11px;opacity:.6;margin-bottom:2px">Google-Titel</div>
-              <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml(t)}</div>
-              <div style="font-size:11px;opacity:.6;margin:7px 0 2px">Google-Beschreibung</div>
-              <div style="font-size:12px;line-height:1.4">${escapeHtml(d)}</div>
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
-            <button class="btn btn-primary" style="padding:8px 11px;font-size:12px" data-apply-seo="${s.id}" data-title="${escapeHtml(s.productTitle || 'dieses Produkt')}">Übernehmen</button>
-            <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-seo="${s.id}">Verwerfen</button>
-          </div>
-        </div>`;
-      }).join('')}
-      <div class="row-sub" style="padding:10px 14px 4px">Das ist der Text, den Google in den Suchergebnissen zeigt. Übernahme schreibt ihn direkt in deinen Shopify-Shop.</div>
+      ${storefrontSuggestions.map(renderStorefrontSuggestion).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">Jede Übernahme schreibt direkt in deinen echten Shopify-Shop – nur nach deiner Bestätigung.</div>
     </div>` : '';
+
+  const seoHtml = studioTriggersHtml + studioListHtml;
 
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
@@ -216,38 +209,129 @@ async function renderApprovals(view) {
     );
   });
 
-  // SEO übernehmen: schreibt ECHT nach Shopify → immer erst Bestätigung.
-  view.querySelectorAll('[data-apply-seo]').forEach(btn => {
-    btn.onclick = () => confirmApplySeo(Number(btn.dataset.applySeo), btn.dataset.title || 'dieses Produkt');
+  // Storefront-Vorschlag übernehmen: schreibt ECHT nach Shopify → Bestätigung.
+  view.querySelectorAll('[data-apply-studio]').forEach(btn => {
+    btn.onclick = () => confirmApplyStudio(
+      Number(btn.dataset.applyStudio),
+      btn.dataset.kind,
+      btn.dataset.label || 'diesen Vorschlag'
+    );
   });
-  // SEO verwerfen: kein Live-Effekt, kurze Rückfrage genügt.
-  view.querySelectorAll('[data-dismiss-seo]').forEach(btn => {
-    btn.onclick = () => confirmDismissSeo(Number(btn.dataset.dismissSeo));
+  // Storefront-Vorschlag verwerfen: kein Live-Effekt, kurze Rückfrage.
+  view.querySelectorAll('[data-dismiss-studio]').forEach(btn => {
+    btn.onclick = () => confirmDismissStudio(Number(btn.dataset.dismissStudio));
+  });
+  // Studio-Trigger: erzeugen nur Vorschläge (nichts live) → kein Dialog nötig.
+  view.querySelectorAll('[data-studio]').forEach(btn => {
+    btn.onclick = () => runStudioGenerate(btn.dataset.studio, btn);
   });
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
   if (goShopifyBtn) goShopifyBtn.onclick = () => navigateTo('shopify');
 }
 
-// Übernimmt einen SEO-Vorschlag nach ausdrücklicher Bestätigung direkt in
-// Shopify (POST /storefront/suggestions/:id/apply). Ändert nur die
-// Google-Metadaten - nicht das Produkt selbst.
-function confirmApplySeo(suggestionId, productTitle) {
+// Metadaten je Vorschlagstyp: Icon, Button-Text und der "Wirklich?"-Text.
+// An EINER Stelle, damit Anzeige und Bestätigung immer zusammenpassen.
+const STUDIO_KIND_META = {
+  seo:                { icon: '🔍', apply: 'Übernehmen',        confirmTitle: 'SEO-Text in Shopify übernehmen?',        confirmBody: (l) => `Der Google-Titel und die -Beschreibung von „${l}" werden in deinem echten Shopify-Shop gesetzt. Das Produkt selbst bleibt unverändert.` },
+  hide_soldout:       { icon: '🚫', apply: 'Aus Shop nehmen',   confirmTitle: 'Produkt aus dem Shop nehmen?',            confirmBody: (l) => `„${l}" ist ausverkauft und wird aus deinem Online-Shop genommen (nicht gelöscht – Produkt und Bestand bleiben erhalten). Sobald wieder Ware da ist, kannst du es zurückstellen.` },
+  feature_collection: { icon: '⭐', apply: 'Kollektion setzen', confirmTitle: 'Kollektion in Shopify aktualisieren?',    confirmBody: (l) => `Die Kollektion „${l}" wird in deinem echten Shopify-Shop mit den vorgeschlagenen Produkten gefüllt. Vorherige Inhalte dieser Kollektion werden ersetzt.` },
+  page:               { icon: '📄', apply: 'Veröffentlichen',   confirmTitle: 'Seite in Shopify veröffentlichen?',       confirmBody: (l) => `Die Seite „${l}" wird in deinem echten Shopify-Shop angelegt bzw. aktualisiert und ist danach für Besucher sichtbar.` },
+  blog:               { icon: '✍️', apply: 'Veröffentlichen',   confirmTitle: 'Blog-Artikel veröffentlichen?',           confirmBody: (l) => `Der Artikel „${l}" wird in deinem echten Shopify-Blog veröffentlicht und ist danach öffentlich lesbar.` },
+};
+
+// Rendert einen Storefront-Vorschlag passend zu seinem Typ (Vorher/Nachher
+// bzw. Vorschau). Gibt für jeden Typ dieselben data-Attribute aus, damit die
+// Verdrahtung generisch bleibt.
+function renderStorefrontSuggestion(s) {
+  const meta = STUDIO_KIND_META[s.kind] || { icon: '•', apply: 'Übernehmen' };
+  const label = s.productTitle || 'Vorschlag';
+  let detail = '';
+
+  if (s.kind === 'seo') {
+    const t = (s.suggested && s.suggested.title) || '';
+    const d = (s.suggested && s.suggested.description) || '';
+    detail = `
+      <div style="font-size:11px;opacity:.6;margin-bottom:2px">Google-Titel</div>
+      <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml(t)}</div>
+      <div style="font-size:11px;opacity:.6;margin:7px 0 2px">Google-Beschreibung</div>
+      <div style="font-size:12px;line-height:1.4">${escapeHtml(d)}</div>`;
+  } else if (s.kind === 'feature_collection') {
+    const prods = (s.suggested && s.suggested.products) || [];
+    detail = `
+      <div style="font-size:11px;opacity:.6;margin-bottom:4px">Kollektion „${escapeHtml((s.suggested && s.suggested.collectionTitle) || 'Empfohlen')}"</div>
+      ${prods.slice(0, 5).map((p, i) => `<div style="font-size:12.5px;line-height:1.5">${i + 1}. ${escapeHtml(p.title || 'Produkt')}${p.unitsSold != null ? ` <span style="opacity:.5">· ${p.unitsSold}× verkauft</span>` : ''}</div>`).join('')}`;
+  } else if (s.kind === 'page' || s.kind === 'blog') {
+    const body = (s.suggested && s.suggested.bodyHtml) || '';
+    const preview = body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+    detail = `
+      <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml((s.suggested && s.suggested.title) || label)}</div>
+      <div style="font-size:12px;line-height:1.45;margin-top:4px;opacity:.85">${escapeHtml(preview)}…</div>`;
+  } else if (s.kind === 'hide_soldout') {
+    detail = `<div style="font-size:12px;line-height:1.4;opacity:.85">Wird aus dem Online-Shop genommen, bis wieder Bestand da ist.</div>`;
+  }
+
+  return `
+    <div class="row" style="align-items:flex-start">
+      <div class="row-icon" style="margin-top:2px">${meta.icon}</div>
+      <div class="row-text">
+        <div class="row-title">${escapeHtml(label)}${s.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
+        <div class="row-sub" style="margin-top:3px">${escapeHtml(s.reason || '')}</div>
+        <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px">${detail}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
+        <button class="btn btn-primary" style="padding:8px 11px;font-size:12px;white-space:nowrap" data-apply-studio="${s.id}" data-kind="${s.kind}" data-label="${escapeHtml(label)}">${meta.apply}</button>
+        <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-studio="${s.id}">Verwerfen</button>
+      </div>
+    </div>`;
+}
+
+// Erzeugt Vorschläge über die Studio-Trigger-Buttons. Legt NUR Vorschläge
+// an (nichts geht live) → daher ohne "Wirklich?"-Dialog.
+async function runStudioGenerate(kind, btn) {
+  const endpoints = {
+    seo: '/storefront/seo/generate',
+    curation: '/storefront/curation/generate',
+    content: '/storefront/content/generate',
+  };
+  const path = endpoints[kind];
+  if (!path) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.innerHTML = '<div class="spinner"></div>';
+  try {
+    const res = await api(path, { method: 'POST' });
+    const n = res.created || 0;
+    toast(n > 0 ? 'Vorschläge erstellt' : 'Nichts Neues',
+      n > 0 ? `${n} neue${n === 1 ? 'r Vorschlag wartet' : ' Vorschläge warten'} auf deine Freigabe.` : 'Aktuell gibt es hier nichts zu verbessern oder es warten schon Vorschläge.',
+      n > 0 ? 'success' : 'info');
+  } catch (err) {
+    btn.disabled = false; btn.textContent = original;
+    toast('Fehlgeschlagen', err.message, 'error');
+    return;
+  }
+  navigateTo('approvals');
+}
+
+// Übernimmt einen Storefront-Vorschlag (beliebiger Typ) nach Bestätigung
+// direkt in Shopify (POST /storefront/suggestions/:id/apply).
+function confirmApplyStudio(suggestionId, kind, label) {
+  const meta = STUDIO_KIND_META[kind] || { apply: 'Übernehmen', confirmTitle: 'In Shopify übernehmen?', confirmBody: (l) => `„${l}" wird in deinem echten Shopify-Shop übernommen.` };
   openSheet(`
-    <div class="sheet-title">SEO-Text in Shopify übernehmen?</div>
-    <div class="sheet-sub">Der Google-Titel und die -Beschreibung von „${escapeHtml(productTitle)}" werden in deinem echten Shopify-Shop gesetzt. Das verbessert, wie dein Produkt bei Google erscheint – das Produkt selbst bleibt unverändert.</div>
-    <button class="btn btn-primary btn-full" id="confirmSeoBtn" style="margin-bottom:10px">Ja, SEO-Text übernehmen</button>
+    <div class="sheet-title">${escapeHtml(meta.confirmTitle)}</div>
+    <div class="sheet-sub">${meta.confirmBody(escapeHtml(label))}</div>
+    <button class="btn btn-primary btn-full" id="confirmStudioBtn" style="margin-bottom:10px">Ja, ${escapeHtml(meta.apply.toLowerCase())}</button>
     <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
   `);
 
-  document.getElementById('confirmSeoBtn').onclick = async () => {
-    const btn = document.getElementById('confirmSeoBtn');
+  document.getElementById('confirmStudioBtn').onclick = async () => {
+    const btn = document.getElementById('confirmStudioBtn');
     btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
     await withActivity(async () => {
       try {
         await api(`/storefront/suggestions/${suggestionId}/apply`, { method: 'POST' });
         closeSheet();
-        toast('SEO übernommen', `„${productTitle}" erscheint jetzt mit dem neuen Text bei Google.`, 'success');
+        toast('Übernommen', `„${label}" ist jetzt in deinem Shopify-Shop aktiv.`, 'success');
       } catch (err) {
         toast('Übernahme fehlgeschlagen', err.message, 'error');
       }
@@ -256,19 +340,19 @@ function confirmApplySeo(suggestionId, productTitle) {
   };
 }
 
-function confirmDismissSeo(suggestionId) {
+function confirmDismissStudio(suggestionId) {
   openSheet(`
-    <div class="sheet-title">SEO-Vorschlag verwerfen?</div>
+    <div class="sheet-title">Vorschlag verwerfen?</div>
     <div class="sheet-sub">Der Vorschlag wird entfernt. Der Autopilot kann später jederzeit einen neuen erzeugen.</div>
-    <button class="btn btn-primary btn-full" id="confirmDismissSeoBtn" style="margin-bottom:10px">Ja, verwerfen</button>
+    <button class="btn btn-primary btn-full" id="confirmDismissStudioBtn" style="margin-bottom:10px">Ja, verwerfen</button>
     <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
   `);
 
-  document.getElementById('confirmDismissSeoBtn').onclick = async () => {
+  document.getElementById('confirmDismissStudioBtn').onclick = async () => {
     closeSheet();
     try {
       await api(`/storefront/suggestions/${suggestionId}/dismiss`, { method: 'POST' });
-      toast('Verworfen', 'Der SEO-Vorschlag wurde entfernt.', 'success');
+      toast('Verworfen', 'Der Vorschlag wurde entfernt.', 'success');
     } catch (err) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
     }
