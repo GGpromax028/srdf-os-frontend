@@ -13,9 +13,10 @@ async function renderApprovals(view) {
   const failedPosts = data.failedPosts || [];
   const lowStock = data.lowStock || [];
   const seasonalIdeas = data.seasonalIdeas || [];
+  const priceSuggestions = data.priceSuggestions || [];
 
   const actionable = postDrafts.length + failedPosts.length;
-  const totalWaiting = actionable + lowStock.length;
+  const totalWaiting = actionable + lowStock.length + priceSuggestions.length;
 
   // ── Kopf: eine ehrliche Gesamtaussage ──
   const headerHtml = totalWaiting === 0
@@ -99,6 +100,22 @@ async function renderApprovals(view) {
       <div style="padding:12px 14px 4px"><button class="btn btn-glass btn-full" id="goShopifyBtn" style="font-size:12.5px">In Shopify ansehen</button></div>
     </div>` : '';
 
+  // ── Preis-Optimierung (Vorschlag → Übernahme mit Bestätigung) ──
+  const priceHtml = priceSuggestions.length ? `
+    <div class="section-h">Preis-Optimierung</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${priceSuggestions.map(s => `
+        <div class="row">
+          <div class="row-icon" style="color:var(--signal-amber)">€</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(s.title)}</div>
+            <div class="row-sub">${s.currentPrice.toFixed(2)}€ → <b style="color:var(--ink)">${s.suggestedPrice.toFixed(2)}€</b> · Marge ${s.currentMarginPct}% → ${s.suggestedMarginPct}%</div>
+          </div>
+          <button class="btn btn-primary" style="padding:8px 11px;font-size:12px;flex-shrink:0" data-apply-price="${escapeHtml(s.shopifyId)}" data-title="${escapeHtml(s.title)}" data-new-price="${s.suggestedPrice}">Übernehmen</button>
+        </div>`).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">Ziel-Marge: ${priceSuggestions[0].targetMarginPct}%. Vorgeschlagen wird der kleinste Preis, der sie erreicht. Übernahme schreibt den Preis direkt in Shopify.</div>
+    </div>` : '';
+
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
     <div class="section-h">Kampagnen-Ideen</div>
@@ -111,7 +128,7 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${ideasHtml}`;
+  view.innerHTML = `${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${ideasHtml}`;
 
   // ── Aktionen verdrahten ──
   // Freigeben/Erneut: geht ECHT live → immer erst der "Wirklich?"-Dialog.
@@ -126,8 +143,43 @@ async function renderApprovals(view) {
     btn.onclick = () => confirmDiscard(Number(btn.dataset.discard));
   });
 
+  // Preis übernehmen: schreibt ECHT nach Shopify → immer erst Bestätigung.
+  view.querySelectorAll('[data-apply-price]').forEach(btn => {
+    btn.onclick = () => confirmApplyPrice(
+      btn.dataset.applyPrice,
+      btn.dataset.title || 'dieses Produkt',
+      Number(btn.dataset.newPrice)
+    );
+  });
+
   const goShopifyBtn = document.getElementById('goShopifyBtn');
   if (goShopifyBtn) goShopifyBtn.onclick = () => navigateTo('shopify');
+}
+
+// Übernimmt den vorgeschlagenen Preis nach ausdrücklicher Bestätigung
+// direkt in Shopify (nutzt PUT /pricing/products/:id/price).
+function confirmApplyPrice(productId, productTitle, newPrice) {
+  openSheet(`
+    <div class="sheet-title">Neuen Preis in Shopify übernehmen?</div>
+    <div class="sheet-sub">Der Verkaufspreis von „${escapeHtml(productTitle)}" wird in deinem echten Shopify-Shop auf <b>${newPrice.toFixed(2)}€</b> gesetzt. Das ist sofort für Kunden sichtbar.</div>
+    <button class="btn btn-primary btn-full" id="confirmPriceBtn" style="margin-bottom:10px">Ja, Preis auf ${newPrice.toFixed(2)}€ setzen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmPriceBtn').onclick = async () => {
+    const btn = document.getElementById('confirmPriceBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    await withActivity(async () => {
+      try {
+        await api(`/pricing/products/${productId}/price`, { method: 'PUT', body: { price: newPrice } });
+        closeSheet();
+        toast('Preis übernommen', `„${productTitle}" kostet jetzt ${newPrice.toFixed(2)}€.`, 'success');
+      } catch (err) {
+        toast('Übernahme fehlgeschlagen', err.message, 'error');
+      }
+      navigateTo('approvals');
+    });
+  };
 }
 
 // Freigeben = veröffentlichen. Nutzt EXAKT denselben Endpunkt wie der
