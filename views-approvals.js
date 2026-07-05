@@ -10,9 +10,10 @@
 async function renderApprovals(view) {
   // Freigaben + Autopilot-Status parallel laden. Der Autopilot-Status
   // darf fehlschlagen, ohne den ganzen Tab zu blockieren.
-  const [data, auto] = await Promise.all([
+  const [data, auto, themes] = await Promise.all([
     api('/approvals/pending'),
     api('/autopilot/status').catch(() => null),
+    api('/storefront/themes').catch(() => null),
   ]);
   const postDrafts = data.postDrafts || [];
   const failedPosts = data.failedPosts || [];
@@ -152,11 +153,35 @@ async function renderApprovals(view) {
       <div style="font-weight:600;font-size:14px;margin-bottom:3px">Deine Shopify-Seite verbessern</div>
       <div class="row-sub" style="margin-bottom:11px">Vorschläge erzeugen – nichts geht live ohne deine Freigabe.</div>
       <div style="display:flex;gap:7px;flex-wrap:wrap">
-        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:120px" data-studio="seo">SEO-Vorschläge</button>
-        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:120px" data-studio="curation">Schaufenster prüfen</button>
-        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:120px" data-studio="content">Seiten &amp; Blog</button>
+        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:110px" data-studio="seo">SEO-Vorschläge</button>
+        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:110px" data-studio="curation">Schaufenster prüfen</button>
+        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:110px" data-studio="content">Seiten &amp; Blog</button>
+        <button class="btn btn-glass" style="padding:8px 12px;font-size:12px;flex:1;min-width:110px" data-studio="design">Design (Optik)</button>
       </div>
     </div>`;
+
+  // ── Design-Entwürfe (Themes) · Vorschau + Veröffentlichen ──
+  // Zeigt vorhandene Entwurfs-Kopien. "Vorschau" öffnet den Entwurf ohne
+  // Live-Wirkung; "Veröffentlichen" ist der einzige echte Live-Schritt und
+  // hat einen eigenen, deutlichen Bestätigungs-Dialog.
+  const draftThemes = (themes && themes.drafts) || [];
+  const themesHtml = draftThemes.length ? `
+    <div class="section-h">Design-Entwürfe</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${draftThemes.map(t => `
+        <div class="row">
+          <div class="row-icon">🎨</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(t.name)}</div>
+            <div class="row-sub">Entwurfs-Kopie · nicht live</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <a class="btn btn-glass" style="padding:8px 11px;font-size:12px" href="${t.previewUrl}" target="_blank" rel="noopener">Vorschau</a>
+            <button class="btn btn-primary" style="padding:8px 11px;font-size:12px" data-publish-theme="${t.id}" data-name="${escapeHtml(t.name)}">Veröffentlichen</button>
+          </div>
+        </div>`).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">„Veröffentlichen" setzt den Entwurf als Live-Theme – erst dann für Besucher sichtbar.</div>
+    </div>` : '';
 
   const studioListHtml = storefrontSuggestions.length ? `
     <div class="section-h">Website-Vorschläge</div>
@@ -179,7 +204,7 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${ideasHtml}`;
+  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${themesHtml}${ideasHtml}`;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
@@ -225,6 +250,10 @@ async function renderApprovals(view) {
   view.querySelectorAll('[data-studio]').forEach(btn => {
     btn.onclick = () => runStudioGenerate(btn.dataset.studio, btn);
   });
+  // Theme veröffentlichen: einziger echter Live-Schritt → starker Dialog.
+  view.querySelectorAll('[data-publish-theme]').forEach(btn => {
+    btn.onclick = () => confirmPublishTheme(Number(btn.dataset.publishTheme), btn.dataset.name || 'Entwurf');
+  });
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
   if (goShopifyBtn) goShopifyBtn.onclick = () => navigateTo('shopify');
@@ -238,7 +267,11 @@ const STUDIO_KIND_META = {
   feature_collection: { icon: '⭐', apply: 'Kollektion setzen', confirmTitle: 'Kollektion in Shopify aktualisieren?',    confirmBody: (l) => `Die Kollektion „${l}" wird in deinem echten Shopify-Shop mit den vorgeschlagenen Produkten gefüllt. Vorherige Inhalte dieser Kollektion werden ersetzt.` },
   page:               { icon: '📄', apply: 'Veröffentlichen',   confirmTitle: 'Seite in Shopify veröffentlichen?',       confirmBody: (l) => `Die Seite „${l}" wird in deinem echten Shopify-Shop angelegt bzw. aktualisiert und ist danach für Besucher sichtbar.` },
   blog:               { icon: '✍️', apply: 'Veröffentlichen',   confirmTitle: 'Blog-Artikel veröffentlichen?',           confirmBody: (l) => `Der Artikel „${l}" wird in deinem echten Shopify-Blog veröffentlicht und ist danach öffentlich lesbar.` },
+  design:             { icon: '🎨', apply: 'Auf Entwurf',       confirmTitle: 'Design auf Entwurfs-Kopie anwenden?',     confirmBody: (l) => `Die Palette „${l}" wird auf eine Entwurfs-Kopie angewendet – live erst nach separater Freigabe.` },
 };
+
+// Prüft, ob ein String ein sicherer Hex-Farbwert ist (für Inline-Styles).
+function isHexColor(v) { return typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v); }
 
 // Rendert einen Storefront-Vorschlag passend zu seinem Typ (Vorher/Nachher
 // bzw. Vorschau). Gibt für jeden Typ dieselben data-Attribute aus, damit die
@@ -269,6 +302,13 @@ function renderStorefrontSuggestion(s) {
       <div style="font-size:12px;line-height:1.45;margin-top:4px;opacity:.85">${escapeHtml(preview)}…</div>`;
   } else if (s.kind === 'hide_soldout') {
     detail = `<div style="font-size:12px;line-height:1.4;opacity:.85">Wird aus dem Online-Shop genommen, bis wieder Bestand da ist.</div>`;
+  } else if (s.kind === 'design') {
+    const c = (s.suggested && s.suggested.colors) || {};
+    const swatches = [c.background, c.text, c.primary, c.secondary, c.accent]
+      .filter(isHexColor)
+      .map(hex => `<span style="display:inline-block;width:22px;height:22px;border-radius:5px;background:${hex};border:1px solid rgba(128,128,128,.35)"></span>`)
+      .join('');
+    detail = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${swatches}<span style="font-size:11.5px;opacity:.7;margin-left:4px">Nur auf Entwurf – live erst nach Freigabe</span></div>`;
   }
 
   return `
@@ -293,6 +333,7 @@ async function runStudioGenerate(kind, btn) {
     seo: '/storefront/seo/generate',
     curation: '/storefront/curation/generate',
     content: '/storefront/content/generate',
+    design: '/storefront/design/generate',
   };
   const path = endpoints[kind];
   if (!path) return;
@@ -316,6 +357,10 @@ async function runStudioGenerate(kind, btn) {
 // Übernimmt einen Storefront-Vorschlag (beliebiger Typ) nach Bestätigung
 // direkt in Shopify (POST /storefront/suggestions/:id/apply).
 function confirmApplyStudio(suggestionId, kind, label) {
+  // Design ist ein Sonderfall: geht NICHT live, sondern auf die
+  // Entwurfs-Kopie – eigener Ablauf mit Vorschau danach.
+  if (kind === 'design') return confirmApplyDesign(suggestionId, label);
+
   const meta = STUDIO_KIND_META[kind] || { apply: 'Übernehmen', confirmTitle: 'In Shopify übernehmen?', confirmBody: (l) => `„${l}" wird in deinem echten Shopify-Shop übernommen.` };
   openSheet(`
     <div class="sheet-title">${escapeHtml(meta.confirmTitle)}</div>
@@ -357,6 +402,65 @@ function confirmDismissStudio(suggestionId) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
     }
     navigateTo('approvals');
+  };
+}
+
+// Design (Optik) anwenden – bewusst SICHER: nur auf die Entwurfs-Kopie,
+// nie live. Nach dem Anwenden gibt es einen Vorschau-Link und die Option,
+// direkt zu veröffentlichen (mit eigenem, starkem Dialog).
+function confirmApplyDesign(suggestionId, paletteName) {
+  openSheet(`
+    <div class="sheet-title">Design auf Entwurfs-Kopie anwenden?</div>
+    <div class="sheet-sub">Die Palette „${escapeHtml(paletteName)}" wird auf eine <b>Entwurfs-Kopie</b> deines Themes angewendet – dein Live-Shop bleibt unverändert. Danach bekommst du einen Vorschau-Link. Existiert noch keine Kopie, wird sie jetzt angelegt (das kann einen Moment dauern).</div>
+    <button class="btn btn-primary btn-full" id="confirmDesignBtn" style="margin-bottom:10px">Ja, auf Entwurf anwenden</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmDesignBtn').onclick = async () => {
+    const btn = document.getElementById('confirmDesignBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      const res = await api(`/storefront/suggestions/${suggestionId}/apply`, { method: 'POST' });
+      openSheet(`
+        <div class="sheet-title">Auf Entwurf angewendet ✓</div>
+        <div class="sheet-sub">„${escapeHtml(paletteName)}" liegt jetzt auf der Entwurfs-Kopie (${res.changes ?? 0} Farbwerte gesetzt). Dein Live-Shop ist unverändert – sieh es dir in Ruhe an.</div>
+        ${res.previewUrl ? `<a class="btn btn-glass btn-full" href="${res.previewUrl}" target="_blank" rel="noopener" style="margin-bottom:10px">Vorschau öffnen</a>` : ''}
+        <button class="btn btn-primary btn-full" id="publishFromDesignBtn" style="margin-bottom:10px">Jetzt veröffentlichen</button>
+        <button class="btn btn-glass btn-full" onclick="closeSheet()">Später</button>
+      `);
+      const pub = document.getElementById('publishFromDesignBtn');
+      if (pub) pub.onclick = () => confirmPublishTheme(res.draftThemeId, 'SRDF-OS Entwurf');
+    } catch (err) {
+      toast('Anwenden fehlgeschlagen', err.message, 'error');
+      navigateTo('approvals');
+    }
+  };
+}
+
+// Der EINZIGE echte Live-Schritt der Optik: den Entwurf zum Live-Theme
+// machen. Deutlicher Dialog, weil es sofort für alle Besucher sichtbar wird.
+function confirmPublishTheme(themeId, name) {
+  if (!themeId) { toast('Kein Entwurf', 'Es gibt noch keine Entwurfs-Kopie zum Veröffentlichen.', 'info'); return; }
+  openSheet(`
+    <div class="sheet-title">Entwurf jetzt live veröffentlichen?</div>
+    <div class="sheet-sub">Der Entwurf „${escapeHtml(name || '')}" wird zu deinem <b>LIVE-Theme</b> – ab sofort für alle Besucher sichtbar. Dein bisheriges Theme bleibt als Entwurf erhalten, du kannst also jederzeit zurückwechseln.</div>
+    <button class="btn btn-primary btn-full" id="confirmPublishBtn" style="margin-bottom:10px">Ja, live veröffentlichen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmPublishBtn').onclick = async () => {
+    const btn = document.getElementById('confirmPublishBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    await withActivity(async () => {
+      try {
+        await api(`/storefront/themes/${themeId}/publish`, { method: 'POST' });
+        closeSheet();
+        toast('Veröffentlicht', 'Dein neues Design ist jetzt live.', 'success');
+      } catch (err) {
+        toast('Veröffentlichen fehlgeschlagen', err.message, 'error');
+      }
+      navigateTo('approvals');
+    });
   };
 }
 
