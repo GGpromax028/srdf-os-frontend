@@ -233,13 +233,25 @@ function showGenerationDetail(item) {
       </div>`
     : '';
 
+  // "In Shopify übernehmen" nur, wenn ein echtes Produkt zugeordnet ist
+  // (kommt aus der Produktauswahl im Generieren-Dialog) und es sich um eine
+  // Produktbeschreibung handelt.
+  const canWriteToShopify = Boolean(item.shopifyProductId) && Boolean(item.output) && item.kind === 'product_description';
+
   openSheet(`
     <div class="sheet-title">${escapeHtml(kindLabel(item.kind))}</div>
     <div class="sheet-sub">${item.approved ? 'Bereits freigegeben' : 'Noch nicht freigegeben'}</div>
     <div class="glass" style="padding:16px;margin-bottom:16px;font-size:13.5px;line-height:1.6;white-space:pre-wrap">${escapeHtml(item.output)}</div>
     ${sourcesHtml}
-    ${!item.approved ? `<button class="btn btn-primary btn-full" id="approveBtn">Als final markieren</button>` : ''}
+    ${canWriteToShopify ? `<button class="btn btn-primary btn-full" id="writeShopifyBtn" style="margin-bottom:10px">In Shopify übernehmen</button>` : ''}
+    ${!item.approved ? `<button class="btn ${canWriteToShopify ? 'btn-glass' : 'btn-primary'} btn-full" id="approveBtn">Als final markieren</button>` : ''}
   `);
+
+  if (canWriteToShopify) {
+    document.getElementById('writeShopifyBtn').onclick = () =>
+      confirmWriteToShopify(item.shopifyProductId, item.productTitle || 'dieses Produkt', item.output);
+  }
+
   if (!item.approved) {
     document.getElementById('approveBtn').onclick = async () => {
       await api(`/ai/${item.id}/approve`, { method: 'POST' });
@@ -250,10 +262,54 @@ function showGenerationDetail(item) {
   }
 }
 
-function openDescriptionSheet() {
+// Schreibt die generierte Beschreibung ECHT in Shopify - deshalb immer erst
+// dieser ausdrückliche Bestätigungs-Dialog, mit Vorschau des Texts, der die
+// bisherige Beschreibung ersetzt.
+function confirmWriteToShopify(productId, productTitle, description) {
+  openSheet(`
+    <div class="sheet-title">In Shopify übernehmen?</div>
+    <div class="sheet-sub">Die Beschreibung von „${escapeHtml(productTitle)}" wird in deinem echten Shopify-Shop gespeichert und ersetzt die bisherige Beschreibung.</div>
+    <div class="glass" style="padding:14px;margin-bottom:16px;max-height:180px;overflow:auto;font-size:13px;line-height:1.6;white-space:pre-wrap">${escapeHtml(description)}</div>
+    <button class="btn btn-primary btn-full" id="confirmWriteBtn" style="margin-bottom:10px">Ja, in Shopify speichern</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmWriteBtn').onclick = async () => {
+    const btn = document.getElementById('confirmWriteBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    await withActivity(async () => {
+      try {
+        await api(`/shopify/products/${productId}/description`, { method: 'PUT', body: { description } });
+        closeSheet();
+        toast('In Shopify gespeichert', `Die Beschreibung von „${productTitle}" ist jetzt aktualisiert.`, 'success');
+        navigateTo('ai');
+      } catch (err) {
+        toast('Speichern fehlgeschlagen', err.message, 'error');
+        btn.disabled = false; btn.textContent = 'Ja, in Shopify speichern';
+      }
+    });
+  };
+}
+
+async function openDescriptionSheet() {
+  // Echte, bereits gesyncte Shopify-Produkte laden, damit die fertige
+  // Beschreibung auf Wunsch direkt ins richtige Produkt zurückgeschrieben
+  // werden kann. Ohne Shopify-Verbindung bleibt alles wie zuvor (freier Text).
+  const products = await api('/shopify/products').catch(() => []);
+
+  const productSelectHtml = products.length > 0 ? `
+    <div class="field">
+      <label class="field-label">Produkt (für direkte Übernahme in Shopify)</label>
+      <select class="input" id="pdProduct" style="appearance:none">
+        <option value="">— Freier Text (keine Shopify-Übernahme) —</option>
+        ${products.map(p => `<option value="${escapeHtml(p.shopify_id)}" data-title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</option>`).join('')}
+      </select>
+    </div>` : '';
+
   openSheet(`
     <div class="sheet-title">Produktbeschreibung generieren</div>
-    <div class="sheet-sub">Echter Claude-Aufruf — kostet eine kleine Menge deines API-Guthabens.</div>
+    <div class="sheet-sub">Echter Claude-Aufruf — kostet eine kleine Menge deines API-Guthabens.${products.length > 0 ? ' Wähle ein echtes Produkt, um die Beschreibung danach mit einem Klick direkt in Shopify zu übernehmen.' : ''}</div>
+    ${productSelectHtml}
     <div class="field"><label class="field-label">Produktname</label><input class="input" id="pdTitle" placeholder="z.B. Premium Sneaker XR"></div>
     <div class="field"><label class="field-label">Eigenschaften</label><textarea class="input" id="pdFeatures" placeholder="z.B. atmungsaktiv, vegan, handgefertigt"></textarea></div>
     <div class="field" style="margin-bottom:18px">
@@ -264,10 +320,22 @@ function openDescriptionSheet() {
     </div>
     <button class="btn btn-primary btn-full" id="pdGenBtn">Generieren</button>
   `);
+
+  // Produktauswahl füllt den Namen automatisch vor (bleibt editierbar).
+  const productSel = document.getElementById('pdProduct');
+  if (productSel) {
+    productSel.onchange = () => {
+      const t = productSel.selectedOptions[0]?.dataset.title;
+      if (t) document.getElementById('pdTitle').value = t;
+    };
+  }
+
   document.getElementById('pdGenBtn').onclick = async () => {
     const title = document.getElementById('pdTitle').value.trim();
     const features = document.getElementById('pdFeatures').value.trim();
     const isAbTest = document.getElementById('pdAbToggle').checked;
+    // Leerer String = kein echtes Produkt gewählt → keine Shopify-Übernahme.
+    const shopifyProductId = productSel ? productSel.value : '';
     if (!title) { toast('Produktname fehlt', '', 'error'); return; }
 
     const btn = document.getElementById('pdGenBtn');
@@ -280,13 +348,13 @@ function openDescriptionSheet() {
           closeSheet();
           toast('Beide Varianten erstellt', '', 'success');
           navigateTo('ai');
-          setTimeout(() => showAbComparisonSheet(result, title), 200);
+          setTimeout(() => showAbComparisonSheet(result, title, { shopifyProductId }), 200);
         } else {
           const { text } = await api('/ai/product-description', { method: 'POST', body: { title, features } });
           closeSheet();
           toast('Text erstellt', '', 'success');
           navigateTo('ai');
-          setTimeout(() => showGenerationDetail({ kind: 'product_description', output: text, approved: false, id: null }), 200);
+          setTimeout(() => showGenerationDetail({ kind: 'product_description', output: text, approved: false, id: null, shopifyProductId, productTitle: title }), 200);
         }
       } catch (err) {
         toast('Fehlgeschlagen', err.message, 'error');
@@ -299,21 +367,30 @@ function openDescriptionSheet() {
 // Zeigt beide A/B-Varianten nebeneinander, mit Button "Diese wählen".
 // Die Wahl markiert die gewählte Variante als "approved" - die andere
 // bleibt unverändert als Vergleich in deiner Historie erhalten.
-function showAbComparisonSheet(result, title) {
+function showAbComparisonSheet(result, title, ctx = {}) {
+  // Wurde im Generieren-Dialog ein echtes Shopify-Produkt gewählt, kann
+  // die gewählte Variante direkt übernommen werden.
+  const canWrite = Boolean(ctx.shopifyProductId);
+  const writeBtn = (variantId) => canWrite
+    ? `<button class="btn btn-glass btn-full" style="margin-top:8px" data-write-variant="${variantId}">In Shopify übernehmen</button>`
+    : '';
+
   openSheet(`
     <div class="sheet-title">A/B-Test: ${escapeHtml(title)}</div>
-    <div class="sheet-sub">Wähle die Variante, die dir besser gefällt — sie wird als deine Entscheidung markiert.</div>
+    <div class="sheet-sub">Wähle die Variante, die dir besser gefällt — sie wird als deine Entscheidung markiert.${canWrite ? ' Oder übernimm eine Variante direkt in Shopify.' : ''}</div>
 
     <div class="glass" style="padding:14px;margin-bottom:12px">
       <div style="font-size:11px;color:var(--depth-blue);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Variante A · ${escapeHtml(result.variantA.label)}</div>
       <div style="font-size:13.5px;line-height:1.6;margin-bottom:12px">${escapeHtml(result.variantA.text)}</div>
       <button class="btn btn-primary btn-full" data-choose-variant="${result.variantA.id}">Diese Variante wählen</button>
+      ${writeBtn(result.variantA.id)}
     </div>
 
     <div class="glass" style="padding:14px;margin-bottom:12px">
       <div style="font-size:11px;color:var(--depth-blue);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Variante B · ${escapeHtml(result.variantB.label)}</div>
       <div style="font-size:13.5px;line-height:1.6;margin-bottom:12px">${escapeHtml(result.variantB.text)}</div>
       <button class="btn btn-primary btn-full" data-choose-variant="${result.variantB.id}">Diese Variante wählen</button>
+      ${writeBtn(result.variantB.id)}
     </div>
   `);
 
@@ -334,6 +411,14 @@ function showAbComparisonSheet(result, title) {
       }
     };
   });
+
+  if (canWrite) {
+    document.querySelectorAll('[data-write-variant]').forEach(btn => {
+      const vid = Number(btn.dataset.writeVariant);
+      const text = vid === result.variantA.id ? result.variantA.text : result.variantB.text;
+      btn.onclick = () => confirmWriteToShopify(ctx.shopifyProductId, title, text);
+    });
+  }
 }
 
 function openCaptionSheet() {
