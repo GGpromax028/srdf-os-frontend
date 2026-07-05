@@ -22,6 +22,7 @@ const state = {
   backgroundActive: false,
   twoFactorEnabled: false,
   demoDataLoaded: false,
+  pendingApprovals: 0,
 };
 
 // ── Hilfsfunktion: fetch mit Timeout ──
