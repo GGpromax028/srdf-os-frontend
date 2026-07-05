@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 const TABS = [
   { id: 'dashboard', icon: '◉', label: 'Übersicht' },
+  { id: 'approvals', icon: '✓', label: 'Freigabe' },
   { id: 'chat', icon: '◔', label: 'Chat' },
   { id: 'shopify', icon: '◫', label: 'Shopify' },
   { id: 'social', icon: '◈', label: 'Social' },
@@ -14,7 +15,7 @@ function renderTabbar() {
   const bar = document.getElementById('tabbar');
   bar.innerHTML = TABS.map(t => `
     <button class="tab ${state.tab === t.id ? 'on' : ''}" data-tab="${t.id}">
-      <div class="tab-icon">${t.icon}</div>
+      <div class="tab-icon">${t.icon}${t.id === 'approvals' && state.pendingApprovals > 0 ? `<span class="tab-dot">${state.pendingApprovals > 9 ? '9+' : state.pendingApprovals}</span>` : ''}</div>
       <div class="tab-label">${t.label}</div>
     </button>`).join('');
 
@@ -23,8 +24,20 @@ function renderTabbar() {
   });
 }
 
+// Lädt nur den kleinen Zähler für das Badge auf dem Freigabe-Tab und
+// zeichnet die Tab-Leiste neu. Bewusst leise: schlägt der Aufruf fehl,
+// bleibt einfach das alte Badge stehen, statt einen Fehler zu zeigen.
+async function refreshApprovalBadge() {
+  try {
+    const { actionableCount } = await api('/approvals/count');
+    state.pendingApprovals = actionableCount;
+    renderTabbar();
+  } catch { /* still ignorieren */ }
+}
+
 const VIEW_TITLES = {
   dashboard: ['Übersicht', 'Alles im Blick'],
+  approvals: ['Freigabe-Center', 'Was auf dich wartet'],
   chat: ['Chat-Assistent', 'Fragen zu deinem Shop'],
   shopify: ['Shopify', 'Produkte & Bestellungen'],
   social: ['Social Media', 'Verbindungen & Beiträge'],
@@ -44,6 +57,7 @@ async function navigateTo(tab) {
 
   try {
     if (tab === 'dashboard') await renderDashboard(view);
+    else if (tab === 'approvals') await renderApprovals(view);
     else if (tab === 'chat') await renderChat(view);
     else if (tab === 'shopify') await renderShopify(view);
     else if (tab === 'social') await renderSocial(view);
@@ -52,6 +66,10 @@ async function navigateTo(tab) {
   } catch (err) {
     view.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div><div class="empty-title">Etwas ist schiefgelaufen</div><div class="empty-sub">${escapeHtml(err.message)}</div></div>`;
   }
+
+  // Badge auf dem Freigabe-Tab nach jeder Navigation aktualisieren -
+  // so verschwindet der Zähler direkt, nachdem du etwas freigegeben hast.
+  refreshApprovalBadge();
 }
 
 // ═══════════════════════════════════════════════════════════
