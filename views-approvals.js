@@ -8,7 +8,12 @@
 // Endpunkte (und denselben "Wirklich?"-Dialog) wie der Social-Tab.
 
 async function renderApprovals(view) {
-  const data = await api('/approvals/pending');
+  // Freigaben + Autopilot-Status parallel laden. Der Autopilot-Status
+  // darf fehlschlagen, ohne den ganzen Tab zu blockieren.
+  const [data, auto] = await Promise.all([
+    api('/approvals/pending'),
+    api('/autopilot/status').catch(() => null),
+  ]);
   const postDrafts = data.postDrafts || [];
   const failedPosts = data.failedPosts || [];
   const lowStock = data.lowStock || [];
@@ -17,6 +22,27 @@ async function renderApprovals(view) {
 
   const actionable = postDrafts.length + failedPosts.length;
   const totalWaiting = actionable + lowStock.length + priceSuggestions.length;
+
+  // ── Autopilot: dein Tagesplan-Kopf ──
+  // Bereitet die Vorschläge des Tages vor. Postet/ändert NICHTS von
+  // selbst - alles landet als Entwurf/Chance in den Abschnitten darunter
+  // und wartet auf deine Freigabe.
+  const autopilotHtml = auto ? `
+    <div class="glass fade-up" style="padding:16px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px">
+        <div>
+          <div class="vital-label">Autopilot</div>
+          <div style="font-weight:600;font-size:15px;margin-top:2px">${auto.ranToday ? 'Dein Plan für heute steht.' : 'Plan für heute erstellen'}</div>
+        </div>
+        <span class="badge badge-${auto.enabled ? (auto.ranToday ? 'gray' : 'amber') : 'gray'}">${auto.enabled ? (auto.ranToday ? 'Aktuell' : 'Bereit') : 'Aus'}</span>
+      </div>
+      <div class="row-sub" style="margin-bottom:12px">
+        ${auto.aiConfigured
+          ? 'Claude schreibt die Entwürfe, du gibst sie frei.'
+          : 'Entwürfe entstehen aus Vorlagen. Sobald dein KI-Key hinterlegt ist, schreibt Claude sie – ohne dass sich am Ablauf etwas ändert.'}
+      </div>
+      <button class="btn btn-primary btn-full" id="runAutopilotBtn" style="font-size:13px">${auto.ranToday ? 'Plan aktualisieren' : 'Tagesplan jetzt erstellen'}</button>
+    </div>` : '';
 
   // ── Kopf: eine ehrliche Gesamtaussage ──
   const headerHtml = totalWaiting === 0
@@ -128,7 +154,13 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${ideasHtml}`;
+  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${ideasHtml}`;
+
+  // ── Autopilot: Tagesplan jetzt erstellen ──
+  // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
+  // laden, damit der frische Plan direkt sichtbar wird.
+  const runAutopilotBtn = document.getElementById('runAutopilotBtn');
+  if (runAutopilotBtn) runAutopilotBtn.onclick = () => runAutopilot(runAutopilotBtn);
 
   // ── Aktionen verdrahten ──
   // Freigeben/Erneut: geht ECHT live → immer erst der "Wirklich?"-Dialog.
@@ -205,6 +237,33 @@ function confirmApproval(postId, platformLabel) {
       navigateTo('approvals');
     });
   };
+}
+
+// Löst den Autopilot manuell aus: er bereitet die Vorschläge des Tages
+// vor (Post-Entwürfe, plus die Chancen-Abschnitte darunter). Bewusst
+// OHNE "Wirklich?"-Dialog - denn hier geht nichts live, es entstehen nur
+// Entwürfe. Die echte Freigabe pro Beitrag/Preis bleibt wie gehabt.
+async function runAutopilot(btn) {
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.innerHTML = '<div class="spinner"></div>';
+  try {
+    const res = await api('/autopilot/run', { method: 'POST' });
+    const n = res.created || 0;
+    if (n > 0) {
+      toast('Tagesplan erstellt', `${n} neue${n === 1 ? 'r Entwurf wartet' : ' Entwürfe warten'} auf deine Freigabe.`, 'success');
+    } else if (res.skippedFull) {
+      toast('Schon genug offen', 'Es warten bereits Entwürfe auf dich – erst die abarbeiten, dann kommt Neues nach.', 'info');
+    } else {
+      toast('Plan aktualisiert', 'Preis-Chancen, Bestand und Ideen sind auf dem neuesten Stand.', 'success');
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = original;
+    toast('Autopilot fehlgeschlagen', err.message, 'error');
+    return;
+  }
+  navigateTo('approvals');
 }
 
 function confirmDiscard(postId) {
