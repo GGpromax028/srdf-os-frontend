@@ -211,8 +211,16 @@ textarea.input{resize:none;min-height:90px;line-height:1.5}
   padding:9px 4px;border-radius:16px;transition:background .2s;
 }
 .tab.on{background:var(--glass-fill-strong)}
-.tab-icon{font-size:19px;opacity:.55;transition:opacity .2s}
+.tab-icon{position:relative;font-size:19px;opacity:.55;transition:opacity .2s}
 .tab.on .tab-icon{opacity:1}
+/* Kleiner Zähler oben rechts am Freigabe-Tab (offene Bestätigungen) */
+.tab-dot{
+  position:absolute;top:-5px;left:50%;margin-left:5px;
+  min-width:15px;height:15px;padding:0 4px;box-sizing:border-box;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--danger);color:#fff;border-radius:8px;
+  font-size:9px;font-weight:700;line-height:1;font-family:var(--font-mono,inherit);
+}
 .tab-label{font-size:10px;font-weight:600;color:var(--ink-faint);transition:color .2s}
 .tab.on .tab-label{color:var(--ink)}
 
