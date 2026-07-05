@@ -19,9 +19,10 @@ async function renderApprovals(view) {
   const lowStock = data.lowStock || [];
   const seasonalIdeas = data.seasonalIdeas || [];
   const priceSuggestions = data.priceSuggestions || [];
+  const storefrontSuggestions = data.storefrontSuggestions || [];
 
   const actionable = postDrafts.length + failedPosts.length;
-  const totalWaiting = actionable + lowStock.length + priceSuggestions.length;
+  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length;
 
   // ── Autopilot: dein Tagesplan-Kopf ──
   // Bereitet die Vorschläge des Tages vor. Postet/ändert NICHTS von
@@ -142,6 +143,37 @@ async function renderApprovals(view) {
       <div class="row-sub" style="padding:10px 14px 4px">Ziel-Marge: ${priceSuggestions[0].targetMarginPct}%. Vorgeschlagen wird der kleinste Preis, der sie erreicht. Übernahme schreibt den Preis direkt in Shopify.</div>
     </div>` : '';
 
+  // ── Website & SEO (Storefront-Studio · Vorher/Nachher) ──
+  // Verbessert deine echte Shopify-Seite. "Übernehmen" schreibt die
+  // SEO-Metadaten direkt nach Shopify - immer erst nach Bestätigung.
+  const seoHtml = storefrontSuggestions.length ? `
+    <div class="section-h">Website &amp; SEO</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${storefrontSuggestions.map(s => {
+        const t = (s.suggested && s.suggested.title) || '';
+        const d = (s.suggested && s.suggested.description) || '';
+        return `
+        <div class="row" style="align-items:flex-start">
+          <div class="row-icon" style="color:var(--signal-amber);margin-top:2px">🔍</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(s.productTitle || 'Produkt')}${s.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
+            <div class="row-sub" style="margin-top:3px">${escapeHtml(s.reason || 'SEO-Vorschlag')}</div>
+            <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px">
+              <div style="font-size:11px;opacity:.6;margin-bottom:2px">Google-Titel</div>
+              <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml(t)}</div>
+              <div style="font-size:11px;opacity:.6;margin:7px 0 2px">Google-Beschreibung</div>
+              <div style="font-size:12px;line-height:1.4">${escapeHtml(d)}</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
+            <button class="btn btn-primary" style="padding:8px 11px;font-size:12px" data-apply-seo="${s.id}" data-title="${escapeHtml(s.productTitle || 'dieses Produkt')}">Übernehmen</button>
+            <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-seo="${s.id}">Verwerfen</button>
+          </div>
+        </div>`;
+      }).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">Das ist der Text, den Google in den Suchergebnissen zeigt. Übernahme schreibt ihn direkt in deinen Shopify-Shop.</div>
+    </div>` : '';
+
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
     <div class="section-h">Kampagnen-Ideen</div>
@@ -154,7 +186,7 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${ideasHtml}`;
+  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${ideasHtml}`;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
@@ -184,8 +216,64 @@ async function renderApprovals(view) {
     );
   });
 
+  // SEO übernehmen: schreibt ECHT nach Shopify → immer erst Bestätigung.
+  view.querySelectorAll('[data-apply-seo]').forEach(btn => {
+    btn.onclick = () => confirmApplySeo(Number(btn.dataset.applySeo), btn.dataset.title || 'dieses Produkt');
+  });
+  // SEO verwerfen: kein Live-Effekt, kurze Rückfrage genügt.
+  view.querySelectorAll('[data-dismiss-seo]').forEach(btn => {
+    btn.onclick = () => confirmDismissSeo(Number(btn.dataset.dismissSeo));
+  });
+
   const goShopifyBtn = document.getElementById('goShopifyBtn');
   if (goShopifyBtn) goShopifyBtn.onclick = () => navigateTo('shopify');
+}
+
+// Übernimmt einen SEO-Vorschlag nach ausdrücklicher Bestätigung direkt in
+// Shopify (POST /storefront/suggestions/:id/apply). Ändert nur die
+// Google-Metadaten - nicht das Produkt selbst.
+function confirmApplySeo(suggestionId, productTitle) {
+  openSheet(`
+    <div class="sheet-title">SEO-Text in Shopify übernehmen?</div>
+    <div class="sheet-sub">Der Google-Titel und die -Beschreibung von „${escapeHtml(productTitle)}" werden in deinem echten Shopify-Shop gesetzt. Das verbessert, wie dein Produkt bei Google erscheint – das Produkt selbst bleibt unverändert.</div>
+    <button class="btn btn-primary btn-full" id="confirmSeoBtn" style="margin-bottom:10px">Ja, SEO-Text übernehmen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmSeoBtn').onclick = async () => {
+    const btn = document.getElementById('confirmSeoBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    await withActivity(async () => {
+      try {
+        await api(`/storefront/suggestions/${suggestionId}/apply`, { method: 'POST' });
+        closeSheet();
+        toast('SEO übernommen', `„${productTitle}" erscheint jetzt mit dem neuen Text bei Google.`, 'success');
+      } catch (err) {
+        toast('Übernahme fehlgeschlagen', err.message, 'error');
+      }
+      navigateTo('approvals');
+    });
+  };
+}
+
+function confirmDismissSeo(suggestionId) {
+  openSheet(`
+    <div class="sheet-title">SEO-Vorschlag verwerfen?</div>
+    <div class="sheet-sub">Der Vorschlag wird entfernt. Der Autopilot kann später jederzeit einen neuen erzeugen.</div>
+    <button class="btn btn-primary btn-full" id="confirmDismissSeoBtn" style="margin-bottom:10px">Ja, verwerfen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmDismissSeoBtn').onclick = async () => {
+    closeSheet();
+    try {
+      await api(`/storefront/suggestions/${suggestionId}/dismiss`, { method: 'POST' });
+      toast('Verworfen', 'Der SEO-Vorschlag wurde entfernt.', 'success');
+    } catch (err) {
+      toast('Verwerfen fehlgeschlagen', err.message, 'error');
+    }
+    navigateTo('approvals');
+  };
 }
 
 // Übernimmt den vorgeschlagenen Preis nach ausdrücklicher Bestätigung
