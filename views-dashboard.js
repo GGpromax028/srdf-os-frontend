@@ -7,6 +7,7 @@ const TABS = [
   { id: 'chat', icon: '◔', label: 'Chat' },
   { id: 'shopify', icon: '◫', label: 'Shopify' },
   { id: 'social', icon: '◈', label: 'Social' },
+  { id: 'analytics', icon: '◭', label: 'Cockpit' },
   { id: 'ai', icon: '✦', label: 'KI' },
   { id: 'settings', icon: '⚙', label: 'Einstellungen' },
 ];
@@ -41,6 +42,7 @@ const VIEW_TITLES = {
   chat: ['Chat-Assistent', 'Fragen zu deinem Shop'],
   shopify: ['Shopify', 'Produkte & Bestellungen'],
   social: ['Social Media', 'Verbindungen & Beiträge'],
+  analytics: ['Analytics-Cockpit', 'Was bringt wirklich Geld?'],
   ai: ['KI-Werkzeuge', 'Echte Claude-Generierung'],
   settings: ['Einstellungen', 'Volle Kontrolle'],
 };
@@ -61,6 +63,7 @@ async function navigateTo(tab) {
     else if (tab === 'chat') await renderChat(view);
     else if (tab === 'shopify') await renderShopify(view);
     else if (tab === 'social') await renderSocial(view);
+    else if (tab === 'analytics') await renderAnalytics(view);
     else if (tab === 'ai') await renderAi(view);
     else if (tab === 'settings') await renderSettings(view);
   } catch (err) {
