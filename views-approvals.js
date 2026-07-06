@@ -282,6 +282,18 @@ async function renderApprovals(view) {
       <div class="row-sub" style="padding:10px 14px 4px">„Verbuchen" schreibt den Satz cent-genau &amp; unveränderbar in die Buchhaltung (Korrektur später nur per Storno).</div>
     </div>` : '';
 
+  // ── Betriebsausgabe erfassen (Trigger → Formular → Buchungsvorschlag) ──
+  // Immer verfügbarer Einstieg, um eine Ausgabe (Miete, Werbung, Gebühren …)
+  // schnell als Buchungsvorschlag anzulegen. Verbucht wird sie erst nach
+  // Freigabe im Buchhaltungs-Abschnitt darunter - gleicher geprüfter Pfad.
+  const expenseTriggerHtml = `
+    <div class="glass fade-up" style="padding:14px;margin-bottom:14px">
+      <div class="vital-label" style="margin-bottom:2px">Betriebsausgaben</div>
+      <div style="font-weight:600;font-size:14px;margin-bottom:3px">Ausgabe erfassen</div>
+      <div class="row-sub" style="margin-bottom:11px">Miete, Werbung, Gebühren, Bürobedarf … als Buchungsvorschlag – verbucht erst nach deiner Freigabe.</div>
+      <button class="btn btn-glass btn-full" id="addExpenseBtn" style="font-size:13px">+ Betriebsausgabe erfassen</button>
+    </div>`;
+
   // Kompakte Ergebnis-Anzeige (damit du die Buchhaltung auf einen Blick siehst).
   const buchhaltungSummaryHtml = (bilanzData && (bilanzData.summeAktivaCents > 0 || bilanzData.jahresergebnisCents !== 0)) ? `
     <div class="glass" style="margin-bottom:14px;padding:14px">
@@ -377,8 +389,8 @@ async function renderApprovals(view) {
       + priceHtml + lowStockHtml + reorderHtml + receiptHtml + seoHtml + themesHtml
     + clusterH('✉️', 'Kunden', crmHtml, orderMailsHtml)
       + crmHtml + orderMailsHtml
-    + clusterH('📒', 'Buchhaltung', buchhaltungHtml, buchhaltungSummaryHtml)
-      + buchhaltungHtml + buchhaltungSummaryHtml;
+    + clusterH('📒', 'Buchhaltung', expenseTriggerHtml, buchhaltungHtml, buchhaltungSummaryHtml)
+      + expenseTriggerHtml + buchhaltungHtml + buchhaltungSummaryHtml;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
@@ -456,6 +468,11 @@ async function renderApprovals(view) {
   view.querySelectorAll('[data-receive-reorder]').forEach(btn => {
     btn.onclick = () => openReceiveReorder(Number(btn.dataset.receiveReorder), btn.dataset.title || 'diesen Posten', btn.dataset.net || '');
   });
+
+  // Betriebsausgabe erfassen: öffnet das Formular (legt nur einen
+  // Buchungsvorschlag an – verbucht wird erst nach Freigabe).
+  const addExpenseBtn = document.getElementById('addExpenseBtn');
+  if (addExpenseBtn) addExpenseBtn.onclick = () => openExpenseForm();
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
   if (goShopifyBtn) goShopifyBtn.onclick = () => navigateTo('shopify');
@@ -725,6 +742,93 @@ function confirmDismissBooking(proposalId) {
       toast('Verworfen', 'Der Buchungsvorschlag wurde entfernt.', 'success');
     } catch (err) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
+    }
+    navigateTo('approvals');
+  };
+}
+
+// Betriebsausgabe erfassen: Kategorie (→ Aufwandskonto), Brutto-Betrag,
+// USt-Satz und Zahlweise. Daraus entsteht NUR ein Buchungsvorschlag – die
+// echte Buchung passiert erst nach Freigabe im Buchhaltungs-Abschnitt (gleicher
+// cent-genauer Pfad wie bei Umsatz und Wareneinkauf).
+async function openExpenseForm() {
+  let categories = [];
+  try {
+    const res = await api('/accounting/expense-categories');
+    categories = res.categories || [];
+  } catch (err) {
+    toast('Nicht verfügbar', err.message, 'error');
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const catOptions = categories
+    .map((c) => `<option value="${escapeHtml(c.key)}" data-vat="${c.defaultVat}">${escapeHtml(c.label)}</option>`)
+    .join('');
+  const defaultVat = categories[0]?.defaultVat ?? 19;
+  const vatOption = (v, label) => `<option value="${v}"${v === defaultVat ? ' selected' : ''}>${label}</option>`;
+
+  openSheet(`
+    <div class="sheet-title">Betriebsausgabe erfassen</div>
+    <div class="sheet-sub">Trage die Ausgabe ein – daraus wird ein Buchungsvorschlag. Verbucht wird er erst nach deiner Freigabe im Buchhaltungs-Abschnitt.</div>
+    <div class="field">
+      <label class="field-label">Kategorie</label>
+      <select class="input" id="expCategory">${catOptions}</select>
+    </div>
+    <div class="field">
+      <label class="field-label">Betrag brutto (inkl. USt)</label>
+      <input class="input" id="expGross" type="text" inputmode="decimal" placeholder="z.B. 250,00">
+    </div>
+    <div class="field">
+      <label class="field-label">USt-Satz</label>
+      <select class="input" id="expVat">
+        ${vatOption(19, '19 %')}${vatOption(7, '7 %')}${vatOption(0, 'keine (0 %)')}
+      </select>
+    </div>
+    <div class="field">
+      <label class="field-label">Zahlweise</label>
+      <select class="input" id="expPayment">
+        <option value="bank">Bezahlt (Bank)</option>
+        <option value="verbindlichkeiten">Auf Rechnung (noch offen)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="field-label">Beschreibung (optional)</label>
+      <input class="input" id="expDesc" type="text" placeholder="z.B. Miete Januar, Meta-Ads">
+    </div>
+    <div class="field">
+      <label class="field-label">Datum</label>
+      <input class="input" id="expDate" type="date" value="${today}" max="${today}">
+    </div>
+    <button class="btn btn-primary btn-full" id="confirmExpenseBtn" style="margin-bottom:10px">Buchungsvorschlag anlegen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  // Beim Wechsel der Kategorie den passenden USt-Standard vorbelegen.
+  const catSel = document.getElementById('expCategory');
+  catSel.onchange = () => {
+    const vat = catSel.selectedOptions[0]?.dataset.vat;
+    if (vat != null) document.getElementById('expVat').value = vat;
+  };
+
+  document.getElementById('confirmExpenseBtn').onclick = async () => {
+    const body = {
+      category: document.getElementById('expCategory').value,
+      grossAmount: (document.getElementById('expGross').value || '').trim(),
+      vatRate: document.getElementById('expVat').value,
+      payment: document.getElementById('expPayment').value,
+      description: (document.getElementById('expDesc').value || '').trim(),
+      bookingDate: document.getElementById('expDate').value || undefined,
+    };
+    const btn = document.getElementById('confirmExpenseBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      await api('/accounting/expenses', { method: 'POST', body });
+      closeSheet();
+      toast('Erfasst', 'Ein Buchungsvorschlag wartet jetzt im Buchhaltungs-Abschnitt auf deine Freigabe.', 'success');
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Buchungsvorschlag anlegen';
+      toast('Fehlgeschlagen', err.message, 'error');
+      return;
     }
     navigateTo('approvals');
   };
