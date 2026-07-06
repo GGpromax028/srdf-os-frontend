@@ -206,18 +206,23 @@ async function renderApprovals(view) {
     review_request: 'Bewertungs-Anfrage',
     order_thankyou: 'Danke für die Bestellung',
     shipping_confirmation: 'Versandbestätigung',
+    abandoned_cart: 'Warenkorb-Erinnerung 🛒',
   };
   const crmOutreach = crmTasks.filter(t => !ORDER_MAIL_KINDS.includes(t.kind));
   const orderMails = crmTasks.filter(t => ORDER_MAIL_KINDS.includes(t.kind));
 
   const renderCrmMailRow = (t) => {
     const preview = (t.bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 130);
+    // Referenz nur als „Bestellung X" zeigen, wenn sie auch eine Bestellung
+    // ist. Bei der Warenkorb-Erinnerung ist die Referenz eine Checkout-ID -
+    // die würde als „Bestellung" fälschlich wirken, also weglassen.
+    const refLabel = (t.ref && t.kind !== 'abandoned_cart') ? ` · Bestellung ${escapeHtml(t.ref)}` : '';
     return `
       <div class="row" style="align-items:flex-start">
         <div class="row-icon" style="margin-top:2px">✉️</div>
         <div class="row-text">
           <div class="row-title">${escapeHtml(CRM_KIND_LABEL[t.kind] || 'Kunden-Mail')}${t.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
-          <div class="row-sub" style="margin-top:3px">An ${escapeHtml(t.customerName || t.customerEmail)}${t.ref ? ` · Bestellung ${escapeHtml(t.ref)}` : ''}</div>
+          <div class="row-sub" style="margin-top:3px">An ${escapeHtml(t.customerName || t.customerEmail)}${refLabel}</div>
           <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px">
             <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml(t.subject)}</div>
             <div style="font-size:12px;line-height:1.45;margin-top:4px;opacity:.85">${escapeHtml(preview)}…</div>
