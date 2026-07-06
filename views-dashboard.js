@@ -1,14 +1,17 @@
 // ═══════════════════════════════════════════════════════════
 // Navigation
 // ═══════════════════════════════════════════════════════════
+// Logisch sortiert nach Arbeitsfluss: zuerst entscheiden (Übersicht,
+// Freigabe), dann analysieren (Cockpit, Shopify), dann erstellen/erreichen
+// (Social, KI, Chat), zuletzt verwalten (Einstellungen).
 const TABS = [
   { id: 'dashboard', icon: '◉', label: 'Übersicht' },
   { id: 'approvals', icon: '✓', label: 'Freigabe' },
-  { id: 'chat', icon: '◔', label: 'Chat' },
+  { id: 'analytics', icon: '◭', label: 'Cockpit' },
   { id: 'shopify', icon: '◫', label: 'Shopify' },
   { id: 'social', icon: '◈', label: 'Social' },
-  { id: 'analytics', icon: '◭', label: 'Cockpit' },
   { id: 'ai', icon: '✦', label: 'KI' },
+  { id: 'chat', icon: '◔', label: 'Chat' },
   { id: 'settings', icon: '⚙', label: 'Einstellungen' },
 ];
 
