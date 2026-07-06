@@ -10,10 +10,11 @@
 async function renderApprovals(view) {
   // Freigaben + Autopilot-Status parallel laden. Der Autopilot-Status
   // darf fehlschlagen, ohne den ganzen Tab zu blockieren.
-  const [data, auto, themes] = await Promise.all([
+  const [data, auto, themes, bilanzData] = await Promise.all([
     api('/approvals/pending'),
     api('/autopilot/status').catch(() => null),
     api('/storefront/themes').catch(() => null),
+    api('/accounting/reports/bilanz').catch(() => null),
   ]);
   const postDrafts = data.postDrafts || [];
   const failedPosts = data.failedPosts || [];
@@ -22,9 +23,10 @@ async function renderApprovals(view) {
   const priceSuggestions = data.priceSuggestions || [];
   const storefrontSuggestions = data.storefrontSuggestions || [];
   const crmTasks = data.crmTasks || [];
+  const bookingProposals = data.bookingProposals || [];
 
   const actionable = postDrafts.length + failedPosts.length;
-  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length + crmTasks.length;
+  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length + crmTasks.length + bookingProposals.length;
 
   // ── Autopilot: dein Tagesplan-Kopf ──
   // Bereitet die Vorschläge des Tages vor. Postet/ändert NICHTS von
@@ -220,6 +222,44 @@ async function renderApprovals(view) {
       <div class="row-sub" style="padding:10px 14px 4px">„Senden" verschickt die Mail echt an den Kunden – erst nach deiner Bestätigung.</div>
     </div>` : '';
 
+  // ── Buchhaltung (Umsatz-Buchungsvorschläge · verbuchen nach Freigabe) ──
+  // Zeigt je Vorschlag den Buchungssatz (Soll/Haben). "Verbuchen" schreibt
+  // ihn cent-genau und unveränderbar in die Buchhaltung.
+  const buchhaltungHtml = bookingProposals.length ? `
+    <div class="section-h">Buchhaltung</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${bookingProposals.map(p => `
+        <div class="row" style="align-items:flex-start">
+          <div class="row-icon" style="margin-top:2px">📒</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(p.description)}</div>
+            <div class="row-sub" style="margin-top:3px">${escapeHtml(p.bookingDate)}${p.note ? ' · ' + escapeHtml(p.note) : ''}</div>
+            <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px;font-size:12.5px;line-height:1.6">
+              ${p.lines.map(l => `<div style="display:flex;justify-content:space-between;gap:10px">
+                <span>${l.debitCents ? 'Soll' : 'Haben'} · ${escapeHtml(l.account)} ${escapeHtml(l.accountName)}</span>
+                <span style="font-variant-numeric:tabular-nums;font-weight:600">${escapeHtml(l.debit || l.credit)}</span>
+              </div>`).join('')}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
+            <button class="btn btn-primary" style="padding:8px 11px;font-size:12px" data-book="${p.id}">Verbuchen</button>
+            <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-book="${p.id}">Verwerfen</button>
+          </div>
+        </div>`).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">„Verbuchen" schreibt den Satz cent-genau &amp; unveränderbar in die Buchhaltung (Korrektur später nur per Storno).</div>
+    </div>` : '';
+
+  // Kompakte Ergebnis-Anzeige (damit du die Buchhaltung auf einen Blick siehst).
+  const buchhaltungSummaryHtml = (bilanzData && (bilanzData.summeAktivaCents > 0 || bilanzData.jahresergebnisCents !== 0)) ? `
+    <div class="glass" style="margin-bottom:14px;padding:14px">
+      <div class="vital-label" style="margin-bottom:6px">Buchhaltung · Stand</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap">
+        <div><div style="font-size:11px;opacity:.6">Bilanzsumme</div><div style="font-weight:600">${escapeHtml(bilanzData.bilanzsummeAktiva)}</div></div>
+        <div><div style="font-size:11px;opacity:.6">${bilanzData.jahresergebnisCents >= 0 ? 'Gewinn' : 'Verlust'}</div><div style="font-weight:600">${escapeHtml(bilanzData.jahresergebnis)}</div></div>
+        <div><div style="font-size:11px;opacity:.6">Bilanz</div><div style="font-weight:600;color:${bilanzData.balanced ? 'var(--signal-green, #16a34a)' : 'var(--danger)'}">${bilanzData.balanced ? 'geht auf ✓' : 'FEHLER'}</div></div>
+      </div>
+    </div>` : '';
+
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
     <div class="section-h">Kampagnen-Ideen</div>
@@ -232,7 +272,7 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${crmHtml}${themesHtml}${ideasHtml}`;
+  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${crmHtml}${buchhaltungHtml}${buchhaltungSummaryHtml}${themesHtml}${ideasHtml}`;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
@@ -288,6 +328,13 @@ async function renderApprovals(view) {
   });
   view.querySelectorAll('[data-dismiss-crm]').forEach(btn => {
     btn.onclick = () => confirmDismissCrm(Number(btn.dataset.dismissCrm));
+  });
+  // Buchhaltung: Verbuchen (echte, unveränderbare Buchung) → Bestätigung.
+  view.querySelectorAll('[data-book]').forEach(btn => {
+    btn.onclick = () => confirmBookProposal(Number(btn.dataset.book));
+  });
+  view.querySelectorAll('[data-dismiss-book]').forEach(btn => {
+    btn.onclick = () => confirmDismissBooking(Number(btn.dataset.dismissBook));
   });
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
@@ -479,6 +526,51 @@ function confirmDismissCrm(taskId) {
     try {
       await api(`/crm/tasks/${taskId}/dismiss`, { method: 'POST' });
       toast('Verworfen', 'Der Entwurf wurde entfernt.', 'success');
+    } catch (err) {
+      toast('Verwerfen fehlgeschlagen', err.message, 'error');
+    }
+    navigateTo('approvals');
+  };
+}
+
+// Verbucht einen Buchungsvorschlag ECHT in die Buchhaltung. Nach dem
+// Verbuchen ist der Satz unveränderbar (Korrektur nur per Storno) - daher
+// vorher der klare Hinweis.
+function confirmBookProposal(proposalId) {
+  openSheet(`
+    <div class="sheet-title">Jetzt verbuchen?</div>
+    <div class="sheet-sub">Dieser Buchungssatz wird <b>cent-genau und unveränderbar</b> in deine Buchhaltung geschrieben. Eine spätere Korrektur ist nur per Storno möglich (die Buchung bleibt dann als Beleg erhalten).</div>
+    <button class="btn btn-primary btn-full" id="confirmBookBtn" style="margin-bottom:10px">Ja, verbuchen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+  document.getElementById('confirmBookBtn').onclick = async () => {
+    const btn = document.getElementById('confirmBookBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    await withActivity(async () => {
+      try {
+        const res = await api(`/accounting/proposals/${proposalId}/book`, { method: 'POST' });
+        closeSheet();
+        toast('Verbucht', `Buchung ${res.entry?.entryNo || ''} wurde erstellt.`, 'success');
+      } catch (err) {
+        toast('Verbuchen fehlgeschlagen', err.message, 'error');
+      }
+      navigateTo('approvals');
+    });
+  };
+}
+
+function confirmDismissBooking(proposalId) {
+  openSheet(`
+    <div class="sheet-title">Buchungsvorschlag verwerfen?</div>
+    <div class="sheet-sub">Der Vorschlag wird entfernt und nicht gebucht. Die zugrunde liegende Bestellung bleibt unberührt; der Autopilot kann später erneut einen Vorschlag erzeugen.</div>
+    <button class="btn btn-primary btn-full" id="confirmDismissBookBtn" style="margin-bottom:10px">Ja, verwerfen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+  document.getElementById('confirmDismissBookBtn').onclick = async () => {
+    closeSheet();
+    try {
+      await api(`/accounting/proposals/${proposalId}/dismiss`, { method: 'POST' });
+      toast('Verworfen', 'Der Buchungsvorschlag wurde entfernt.', 'success');
     } catch (err) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
     }
