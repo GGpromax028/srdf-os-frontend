@@ -24,9 +24,10 @@ async function renderApprovals(view) {
   const storefrontSuggestions = data.storefrontSuggestions || [];
   const crmTasks = data.crmTasks || [];
   const bookingProposals = data.bookingProposals || [];
+  const reorderTasks = data.reorderTasks || [];
 
   const actionable = postDrafts.length + failedPosts.length;
-  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length + crmTasks.length + bookingProposals.length;
+  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length + crmTasks.length + bookingProposals.length + reorderTasks.length;
 
   // ── Autopilot: dein Tagesplan-Kopf ──
   // Bereitet die Vorschläge des Tages vor. Postet/ändert NICHTS von
@@ -291,6 +292,41 @@ async function renderApprovals(view) {
       </div>
     </div>` : '';
 
+  // ── Wareneinkauf (Nachbestell-Vorschläge · knapp UND gefragt) ──
+  // Zeigt je Produkt die empfohlene Nachbestellmenge samt Begründung
+  // (Bestand + echte Verkaufszahlen) und geschätzten Einkaufskosten.
+  // "Als bestellt markieren" ist eine nachvollziehbare Einkaufs-Entscheidung
+  // (kein externer Versand, keine Buchung, kein Eingriff in Shopify).
+  const reorderHtml = reorderTasks.length ? `
+    <div class="section-h">Wareneinkauf</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${reorderTasks.map(t => `
+        <div class="row" style="align-items:flex-start">
+          <div class="row-icon" style="margin-top:2px">📦</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(t.productTitle || 'Produkt')}${t.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
+            <div class="row-sub" style="margin-top:3px">${escapeHtml(t.reason || '')}</div>
+            <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px;font-size:12.5px;line-height:1.6">
+              <div style="display:flex;justify-content:space-between;gap:10px">
+                <span>Empfohlene Nachbestellung</span>
+                <span style="font-variant-numeric:tabular-nums;font-weight:600">${t.suggestedQty} Stück</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;gap:10px">
+                <span>Geschätzte Einkaufskosten</span>
+                <span style="font-variant-numeric:tabular-nums;font-weight:600">${t.estCost
+                  ? escapeHtml(t.estCost) + ' <span style="opacity:.6;font-weight:400">(netto)</span>'
+                  : '<span style="opacity:.6;font-weight:400">Einkaufspreis fehlt</span>'}</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
+            <button class="btn btn-primary" style="padding:8px 11px;font-size:12px;white-space:nowrap" data-order-reorder="${t.id}" data-title="${escapeHtml(t.productTitle || 'dieses Produkt')}" data-qty="${t.suggestedQty}">Als bestellt</button>
+            <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-reorder="${t.id}">Verwerfen</button>
+          </div>
+        </div>`).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">Vorgeschlagen wird nur, was knapp <b>und</b> gefragt ist. „Als bestellt" merkt sich deine Einkaufs-Entscheidung – es wird nichts automatisch bestellt oder verbucht.</div>
+    </div>` : '';
+
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
     <div class="section-h">Kampagnen-Ideen</div>
@@ -316,8 +352,8 @@ async function renderApprovals(view) {
     autopilotHtml + headerHtml
     + clusterH('🛍', 'Marketing &amp; Social', draftsHtml, failedHtml, ideasHtml)
       + draftsHtml + failedHtml + ideasHtml
-    + clusterH('📈', 'Shop &amp; Umsatz', priceHtml, lowStockHtml, seoHtml, themesHtml)
-      + priceHtml + lowStockHtml + seoHtml + themesHtml
+    + clusterH('📈', 'Shop &amp; Umsatz', priceHtml, lowStockHtml, reorderHtml, seoHtml, themesHtml)
+      + priceHtml + lowStockHtml + reorderHtml + seoHtml + themesHtml
     + clusterH('✉️', 'Kunden', crmHtml, orderMailsHtml)
       + crmHtml + orderMailsHtml
     + clusterH('📒', 'Buchhaltung', buchhaltungHtml, buchhaltungSummaryHtml)
@@ -387,6 +423,13 @@ async function renderApprovals(view) {
   });
   view.querySelectorAll('[data-dismiss-book]').forEach(btn => {
     btn.onclick = () => confirmDismissBooking(Number(btn.dataset.dismissBook));
+  });
+  // Wareneinkauf: "Als bestellt markieren" (Einkaufs-Entscheidung) → Bestätigung.
+  view.querySelectorAll('[data-order-reorder]').forEach(btn => {
+    btn.onclick = () => confirmMarkOrdered(Number(btn.dataset.orderReorder), btn.dataset.title || 'dieses Produkt', Number(btn.dataset.qty));
+  });
+  view.querySelectorAll('[data-dismiss-reorder]').forEach(btn => {
+    btn.onclick = () => confirmDismissReorder(Number(btn.dataset.dismissReorder));
   });
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
@@ -655,6 +698,51 @@ function confirmDismissBooking(proposalId) {
     try {
       await api(`/accounting/proposals/${proposalId}/dismiss`, { method: 'POST' });
       toast('Verworfen', 'Der Buchungsvorschlag wurde entfernt.', 'success');
+    } catch (err) {
+      toast('Verwerfen fehlgeschlagen', err.message, 'error');
+    }
+    navigateTo('approvals');
+  };
+}
+
+// Nachbestellung als "bestellt" markieren – deine Einkaufs-Entscheidung.
+// Kein externer Versand, keine Buchung, kein Eingriff in Shopify: nur eine
+// nachvollziehbare Notiz, damit der Vorschlag aus der Liste verschwindet und
+// nicht doppelt vorgeschlagen wird. Trotzdem kurze Rückfrage, damit die
+// Entscheidung bewusst bleibt.
+function confirmMarkOrdered(taskId, productTitle, qty) {
+  openSheet(`
+    <div class="sheet-title">Als bestellt markieren?</div>
+    <div class="sheet-sub">Du bestätigst, dass du <b>${qty} Stück</b> von „${escapeHtml(productTitle)}" bei deinem Lieferanten nachbestellt hast. Das ist nur eine Notiz für dich – es wird nichts automatisch bestellt, verbucht oder am Shopify-Bestand geändert.</div>
+    <button class="btn btn-primary btn-full" id="confirmReorderBtn" style="margin-bottom:10px">Ja, als bestellt markieren</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+  document.getElementById('confirmReorderBtn').onclick = async () => {
+    const btn = document.getElementById('confirmReorderBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      await api(`/reorder/tasks/${taskId}/order`, { method: 'POST' });
+      closeSheet();
+      toast('Notiert', `„${productTitle}" ist als bestellt markiert.`, 'success');
+    } catch (err) {
+      toast('Fehlgeschlagen', err.message, 'error');
+    }
+    navigateTo('approvals');
+  };
+}
+
+function confirmDismissReorder(taskId) {
+  openSheet(`
+    <div class="sheet-title">Nachbestell-Vorschlag verwerfen?</div>
+    <div class="sheet-sub">Der Vorschlag wird entfernt. Bleibt das Produkt knapp und gefragt, kann der Autopilot später erneut einen Vorschlag erzeugen.</div>
+    <button class="btn btn-primary btn-full" id="confirmDismissReorderBtn" style="margin-bottom:10px">Ja, verwerfen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+  document.getElementById('confirmDismissReorderBtn').onclick = async () => {
+    closeSheet();
+    try {
+      await api(`/reorder/tasks/${taskId}/dismiss`, { method: 'POST' });
+      toast('Verworfen', 'Der Vorschlag wurde entfernt.', 'success');
     } catch (err) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
     }
