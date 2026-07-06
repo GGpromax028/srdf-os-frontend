@@ -297,7 +297,25 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${crmHtml}${orderMailsHtml}${buchhaltungHtml}${buchhaltungSummaryHtml}${themesHtml}${ideasHtml}`;
+  // Übersichtlich gruppiert: die vielen Abschnitte werden in vier klare
+  // Cluster sortiert (Marketing → Shop → Kunden → Buchhaltung). Eine
+  // Cluster-Überschrift erscheint NUR, wenn der Cluster auch Inhalt hat -
+  // so bleibt der Screen aufgeräumt, wenn gerade wenig ansteht.
+  const clusterH = (icon, title, ...parts) =>
+    parts.some(p => p && p.trim())
+      ? `<div style="margin:28px 6px 2px;padding-top:16px;border-top:1px solid var(--glass-edge-soft);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);display:flex;align-items:center;gap:7px"><span style="font-size:14px">${icon}</span>${title}</div>`
+      : '';
+
+  view.innerHTML =
+    autopilotHtml + headerHtml
+    + clusterH('🛍', 'Marketing &amp; Social', draftsHtml, failedHtml, ideasHtml)
+      + draftsHtml + failedHtml + ideasHtml
+    + clusterH('📈', 'Shop &amp; Umsatz', priceHtml, lowStockHtml, seoHtml, themesHtml)
+      + priceHtml + lowStockHtml + seoHtml + themesHtml
+    + clusterH('✉️', 'Kunden', crmHtml, orderMailsHtml)
+      + crmHtml + orderMailsHtml
+    + clusterH('📒', 'Buchhaltung', buchhaltungHtml, buchhaltungSummaryHtml)
+      + buchhaltungHtml + buchhaltungSummaryHtml;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
