@@ -25,9 +25,10 @@ async function renderApprovals(view) {
   const crmTasks = data.crmTasks || [];
   const bookingProposals = data.bookingProposals || [];
   const reorderTasks = data.reorderTasks || [];
+  const orderedReorders = data.orderedReorders || [];
 
   const actionable = postDrafts.length + failedPosts.length;
-  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length + crmTasks.length + bookingProposals.length + reorderTasks.length;
+  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length + crmTasks.length + bookingProposals.length + reorderTasks.length + orderedReorders.length;
 
   // ── Autopilot: dein Tagesplan-Kopf ──
   // Bereitet die Vorschläge des Tages vor. Postet/ändert NICHTS von
@@ -327,6 +328,26 @@ async function renderApprovals(view) {
       <div class="row-sub" style="padding:10px 14px 4px">Vorgeschlagen wird nur, was knapp <b>und</b> gefragt ist. „Als bestellt" merkt sich deine Einkaufs-Entscheidung – es wird nichts automatisch bestellt oder verbucht.</div>
     </div>` : '';
 
+  // ── Wareneingang (bestellte Posten · Rechnung erfassen → Buchungsvorschlag) ──
+  // Was du bestellt hast, wartet hier, bis Ware/Rechnung da ist. „Wareneingang
+  // buchen" öffnet ein kleines Formular (Netto-Betrag der Rechnung + Zahlweise)
+  // und erzeugt daraus einen Wareneinkaufs-Buchungsvorschlag im Buchhaltungs-
+  // Abschnitt – verbucht wird er dort, wie gewohnt, erst nach deiner Freigabe.
+  const receiptHtml = orderedReorders.length ? `
+    <div class="section-h">Wareneingang</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${orderedReorders.map(t => `
+        <div class="row">
+          <div class="row-icon">🚚</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(t.productTitle || 'Posten')}</div>
+            <div class="row-sub">${t.suggestedQty} Stück bestellt${t.estCost ? ` · geschätzt ${escapeHtml(t.estCost)} netto` : ''}</div>
+          </div>
+          <button class="btn btn-primary" style="padding:8px 11px;font-size:12px;flex-shrink:0;white-space:nowrap" data-receive-reorder="${t.id}" data-title="${escapeHtml(t.productTitle || 'diesen Posten')}" data-net="${escapeHtml(t.estCostValue || '')}">Wareneingang buchen</button>
+        </div>`).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">„Wareneingang buchen" erfasst die Lieferanten-Rechnung und legt einen Wareneinkaufs-Buchungsvorschlag an – der Lagerbestand bleibt in Shopify, hier wird nichts automatisch verbucht.</div>
+    </div>` : '';
+
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
     <div class="section-h">Kampagnen-Ideen</div>
@@ -352,8 +373,8 @@ async function renderApprovals(view) {
     autopilotHtml + headerHtml
     + clusterH('🛍', 'Marketing &amp; Social', draftsHtml, failedHtml, ideasHtml)
       + draftsHtml + failedHtml + ideasHtml
-    + clusterH('📈', 'Shop &amp; Umsatz', priceHtml, lowStockHtml, reorderHtml, seoHtml, themesHtml)
-      + priceHtml + lowStockHtml + reorderHtml + seoHtml + themesHtml
+    + clusterH('📈', 'Shop &amp; Umsatz', priceHtml, lowStockHtml, reorderHtml, receiptHtml, seoHtml, themesHtml)
+      + priceHtml + lowStockHtml + reorderHtml + receiptHtml + seoHtml + themesHtml
     + clusterH('✉️', 'Kunden', crmHtml, orderMailsHtml)
       + crmHtml + orderMailsHtml
     + clusterH('📒', 'Buchhaltung', buchhaltungHtml, buchhaltungSummaryHtml)
@@ -430,6 +451,10 @@ async function renderApprovals(view) {
   });
   view.querySelectorAll('[data-dismiss-reorder]').forEach(btn => {
     btn.onclick = () => confirmDismissReorder(Number(btn.dataset.dismissReorder));
+  });
+  // Wareneingang buchen: Formular (Netto-Betrag + Zahlweise) → Buchungsvorschlag.
+  view.querySelectorAll('[data-receive-reorder]').forEach(btn => {
+    btn.onclick = () => openReceiveReorder(Number(btn.dataset.receiveReorder), btn.dataset.title || 'diesen Posten', btn.dataset.net || '');
   });
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
@@ -745,6 +770,47 @@ function confirmDismissReorder(taskId) {
       toast('Verworfen', 'Der Vorschlag wurde entfernt.', 'success');
     } catch (err) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
+    }
+    navigateTo('approvals');
+  };
+}
+
+// Wareneingang erfassen: kleines Formular für den echten Netto-Betrag der
+// Lieferanten-Rechnung (vorbelegt mit der Schätzung, editierbar) und die
+// Zahlweise. Daraus entsteht ein Wareneinkaufs-Buchungsvorschlag - verbucht
+// wird er erst später im Buchhaltungs-Abschnitt (bewusst zweistufig, damit die
+// echte Buchung immer über denselben geprüften "Verbuchen"-Pfad läuft).
+function openReceiveReorder(taskId, productTitle, netDefault) {
+  openSheet(`
+    <div class="sheet-title">Wareneingang buchen</div>
+    <div class="sheet-sub">Erfasse die Lieferanten-Rechnung für „${escapeHtml(productTitle)}". Daraus wird ein Buchungsvorschlag (Wareneingang + Vorsteuer) – echt verbucht wird er erst nach deiner Freigabe im Buchhaltungs-Abschnitt.</div>
+    <div class="field">
+      <label class="field-label">Netto-Einkaufsbetrag (ohne USt)</label>
+      <input class="input" id="receiveNet" type="text" inputmode="decimal" value="${escapeHtml(netDefault)}" placeholder="z.B. 131,20">
+    </div>
+    <div class="field">
+      <label class="field-label">Zahlweise</label>
+      <select class="input" id="receivePayment">
+        <option value="verbindlichkeiten">Auf Rechnung (noch offen)</option>
+        <option value="bank">Sofort bezahlt (Bank)</option>
+      </select>
+    </div>
+    <button class="btn btn-primary btn-full" id="confirmReceiveBtn" style="margin-bottom:10px">Buchungsvorschlag anlegen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+  document.getElementById('confirmReceiveBtn').onclick = async () => {
+    const netAmount = (document.getElementById('receiveNet').value || '').trim();
+    const payment = document.getElementById('receivePayment').value;
+    const btn = document.getElementById('confirmReceiveBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    try {
+      await api(`/reorder/tasks/${taskId}/receive`, { method: 'POST', body: { netAmount, payment } });
+      closeSheet();
+      toast('Wareneingang erfasst', 'Ein Wareneinkaufs-Buchungsvorschlag wartet jetzt im Buchhaltungs-Abschnitt auf deine Freigabe.', 'success');
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Buchungsvorschlag anlegen';
+      toast('Fehlgeschlagen', err.message, 'error');
+      return;
     }
     navigateTo('approvals');
   };
