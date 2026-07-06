@@ -202,6 +202,7 @@ async function renderApprovals(view) {
   const ORDER_MAIL_KINDS = ['order_thankyou', 'shipping_confirmation'];
   const CRM_KIND_LABEL = {
     winback: 'Kunde zurückholen',
+    winback_vip: 'Stammkunde zurückholen ⭐',
     review_request: 'Bewertungs-Anfrage',
     order_thankyou: 'Danke für die Bestellung',
     shipping_confirmation: 'Versandbestätigung',
