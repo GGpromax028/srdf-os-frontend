@@ -21,9 +21,10 @@ async function renderApprovals(view) {
   const seasonalIdeas = data.seasonalIdeas || [];
   const priceSuggestions = data.priceSuggestions || [];
   const storefrontSuggestions = data.storefrontSuggestions || [];
+  const crmTasks = data.crmTasks || [];
 
   const actionable = postDrafts.length + failedPosts.length;
-  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length;
+  const totalWaiting = actionable + lowStock.length + priceSuggestions.length + storefrontSuggestions.length + crmTasks.length;
 
   // ── Autopilot: dein Tagesplan-Kopf ──
   // Bereitet die Vorschläge des Tages vor. Postet/ändert NICHTS von
@@ -192,6 +193,33 @@ async function renderApprovals(view) {
 
   const seoHtml = studioTriggersHtml + studioListHtml;
 
+  // ── Kunden & Vertrieb (CRM · entworfene Mails, Versand nach Freigabe) ──
+  const CRM_KIND_LABEL = { winback: 'Kunde zurückholen', review_request: 'Bewertungs-Anfrage' };
+  const crmHtml = crmTasks.length ? `
+    <div class="section-h">Kunden &amp; Vertrieb</div>
+    <div class="glass" style="margin-bottom:14px">
+      ${crmTasks.map(t => {
+        const preview = (t.bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 130);
+        return `
+        <div class="row" style="align-items:flex-start">
+          <div class="row-icon" style="margin-top:2px">✉️</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(CRM_KIND_LABEL[t.kind] || 'Kunden-Mail')}${t.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
+            <div class="row-sub" style="margin-top:3px">An ${escapeHtml(t.customerName || t.customerEmail)}${t.ref ? ` · Bestellung ${escapeHtml(t.ref)}` : ''}</div>
+            <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px">
+              <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml(t.subject)}</div>
+              <div style="font-size:12px;line-height:1.45;margin-top:4px;opacity:.85">${escapeHtml(preview)}…</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
+            <button class="btn btn-primary" style="padding:8px 11px;font-size:12px" data-send-crm="${t.id}" data-email="${escapeHtml(t.customerEmail)}">Senden</button>
+            <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-crm="${t.id}">Verwerfen</button>
+          </div>
+        </div>`;
+      }).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">„Senden" verschickt die Mail echt an den Kunden – erst nach deiner Bestätigung.</div>
+    </div>` : '';
+
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
     <div class="section-h">Kampagnen-Ideen</div>
@@ -204,7 +232,7 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${themesHtml}${ideasHtml}`;
+  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${crmHtml}${themesHtml}${ideasHtml}`;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
@@ -253,6 +281,13 @@ async function renderApprovals(view) {
   // Theme veröffentlichen: einziger echter Live-Schritt → starker Dialog.
   view.querySelectorAll('[data-publish-theme]').forEach(btn => {
     btn.onclick = () => confirmPublishTheme(Number(btn.dataset.publishTheme), btn.dataset.name || 'Entwurf');
+  });
+  // CRM: Kunden-Mail senden (Aktion nach außen) → Bestätigung.
+  view.querySelectorAll('[data-send-crm]').forEach(btn => {
+    btn.onclick = () => confirmSendCrm(Number(btn.dataset.sendCrm), btn.dataset.email || 'den Kunden');
+  });
+  view.querySelectorAll('[data-dismiss-crm]').forEach(btn => {
+    btn.onclick = () => confirmDismissCrm(Number(btn.dataset.dismissCrm));
   });
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
@@ -398,6 +433,52 @@ function confirmDismissStudio(suggestionId) {
     try {
       await api(`/storefront/suggestions/${suggestionId}/dismiss`, { method: 'POST' });
       toast('Verworfen', 'Der Vorschlag wurde entfernt.', 'success');
+    } catch (err) {
+      toast('Verwerfen fehlgeschlagen', err.message, 'error');
+    }
+    navigateTo('approvals');
+  };
+}
+
+// Kunden-Mail senden – echte Aktion nach außen, daher immer erst der
+// "Wirklich?"-Dialog. Nach Erfolg verschwindet der Entwurf aus der Liste.
+function confirmSendCrm(taskId, customerEmail) {
+  openSheet(`
+    <div class="sheet-title">E-Mail wirklich an den Kunden senden?</div>
+    <div class="sheet-sub">Diese Nachricht geht echt an <b>${escapeHtml(customerEmail)}</b> raus. Bitte prüfe kurz, dass der Text passt – Versand lässt sich nicht zurücknehmen.</div>
+    <button class="btn btn-primary btn-full" id="confirmSendCrmBtn" style="margin-bottom:10px">Ja, jetzt senden</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmSendCrmBtn').onclick = async () => {
+    const btn = document.getElementById('confirmSendCrmBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    await withActivity(async () => {
+      try {
+        await api(`/crm/tasks/${taskId}/send`, { method: 'POST' });
+        closeSheet();
+        toast('Gesendet', `Deine Mail ist an ${customerEmail} unterwegs.`, 'success');
+      } catch (err) {
+        toast('Senden fehlgeschlagen', err.message, 'error');
+      }
+      navigateTo('approvals');
+    });
+  };
+}
+
+function confirmDismissCrm(taskId) {
+  openSheet(`
+    <div class="sheet-title">Entwurf verwerfen?</div>
+    <div class="sheet-sub">Diese Kunden-Mail wird entfernt und nicht gesendet. Der Autopilot kann später einen neuen Entwurf erzeugen.</div>
+    <button class="btn btn-primary btn-full" id="confirmDismissCrmBtn" style="margin-bottom:10px">Ja, verwerfen</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmDismissCrmBtn').onclick = async () => {
+    closeSheet();
+    try {
+      await api(`/crm/tasks/${taskId}/dismiss`, { method: 'POST' });
+      toast('Verworfen', 'Der Entwurf wurde entfernt.', 'success');
     } catch (err) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
     }
