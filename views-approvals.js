@@ -195,31 +195,56 @@ async function renderApprovals(view) {
 
   const seoHtml = studioTriggersHtml + studioListHtml;
 
-  // ── Kunden & Vertrieb (CRM · entworfene Mails, Versand nach Freigabe) ──
-  const CRM_KIND_LABEL = { winback: 'Kunde zurückholen', review_request: 'Bewertungs-Anfrage' };
-  const crmHtml = crmTasks.length ? `
+  // ── Kunden-Mails (CRM · entworfene Mails, Versand nach Freigabe) ──
+  // Zwei Gruppen: Outreach (Win-back/Bewertung) und transaktionale
+  // Bestellstatus-Mails (Danke/Versand) - letztere in eigener Sektion
+  // inkl. Sammel-Freigabe.
+  const ORDER_MAIL_KINDS = ['order_thankyou', 'shipping_confirmation'];
+  const CRM_KIND_LABEL = {
+    winback: 'Kunde zurückholen',
+    review_request: 'Bewertungs-Anfrage',
+    order_thankyou: 'Danke für die Bestellung',
+    shipping_confirmation: 'Versandbestätigung',
+  };
+  const crmOutreach = crmTasks.filter(t => !ORDER_MAIL_KINDS.includes(t.kind));
+  const orderMails = crmTasks.filter(t => ORDER_MAIL_KINDS.includes(t.kind));
+
+  const renderCrmMailRow = (t) => {
+    const preview = (t.bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 130);
+    return `
+      <div class="row" style="align-items:flex-start">
+        <div class="row-icon" style="margin-top:2px">✉️</div>
+        <div class="row-text">
+          <div class="row-title">${escapeHtml(CRM_KIND_LABEL[t.kind] || 'Kunden-Mail')}${t.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
+          <div class="row-sub" style="margin-top:3px">An ${escapeHtml(t.customerName || t.customerEmail)}${t.ref ? ` · Bestellung ${escapeHtml(t.ref)}` : ''}</div>
+          <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px">
+            <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml(t.subject)}</div>
+            <div style="font-size:12px;line-height:1.45;margin-top:4px;opacity:.85">${escapeHtml(preview)}…</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
+          <button class="btn btn-primary" style="padding:8px 11px;font-size:12px" data-send-crm="${t.id}" data-email="${escapeHtml(t.customerEmail)}">Senden</button>
+          <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-crm="${t.id}">Verwerfen</button>
+        </div>
+      </div>`;
+  };
+
+  const crmHtml = crmOutreach.length ? `
     <div class="section-h">Kunden &amp; Vertrieb</div>
     <div class="glass" style="margin-bottom:14px">
-      ${crmTasks.map(t => {
-        const preview = (t.bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 130);
-        return `
-        <div class="row" style="align-items:flex-start">
-          <div class="row-icon" style="margin-top:2px">✉️</div>
-          <div class="row-text">
-            <div class="row-title">${escapeHtml(CRM_KIND_LABEL[t.kind] || 'Kunden-Mail')}${t.createdByAi ? ' <span style="opacity:.5">✦KI</span>' : ''}</div>
-            <div class="row-sub" style="margin-top:3px">An ${escapeHtml(t.customerName || t.customerEmail)}${t.ref ? ` · Bestellung ${escapeHtml(t.ref)}` : ''}</div>
-            <div style="margin-top:8px;padding:9px 11px;background:var(--glass-fill-strong);border-radius:9px">
-              <div style="font-size:12.5px;font-weight:600;line-height:1.35">${escapeHtml(t.subject)}</div>
-              <div style="font-size:12px;line-height:1.45;margin-top:4px;opacity:.85">${escapeHtml(preview)}…</div>
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:8px">
-            <button class="btn btn-primary" style="padding:8px 11px;font-size:12px" data-send-crm="${t.id}" data-email="${escapeHtml(t.customerEmail)}">Senden</button>
-            <button class="btn btn-glass" style="padding:8px 11px;font-size:12px" data-dismiss-crm="${t.id}">Verwerfen</button>
-          </div>
-        </div>`;
-      }).join('')}
+      ${crmOutreach.map(renderCrmMailRow).join('')}
       <div class="row-sub" style="padding:10px 14px 4px">„Senden" verschickt die Mail echt an den Kunden – erst nach deiner Bestätigung.</div>
+    </div>` : '';
+
+  const orderMailsHtml = orderMails.length ? `
+    <div class="section-h">Bestellstatus-Mails</div>
+    <div class="glass" style="margin-bottom:14px">
+      <div class="row" style="padding-bottom:6px">
+        <div class="row-text"><div class="row-sub">${orderMails.length} Entwurf(e) · Danke &amp; Versandbestätigung</div></div>
+        <button class="btn btn-primary" style="padding:8px 12px;font-size:12px;flex-shrink:0" data-send-order-mails-all="1">Alle ${orderMails.length} senden</button>
+      </div>
+      ${orderMails.map(renderCrmMailRow).join('')}
+      <div class="row-sub" style="padding:10px 14px 4px">„Alle senden" verschickt sämtliche Bestellstatus-Mails echt an die Kunden – erst nach deiner Bestätigung.</div>
     </div>` : '';
 
   // ── Buchhaltung (Umsatz-Buchungsvorschläge · verbuchen nach Freigabe) ──
@@ -272,7 +297,7 @@ async function renderApprovals(view) {
         </div>`).join('')}
     </div>` : '';
 
-  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${crmHtml}${buchhaltungHtml}${buchhaltungSummaryHtml}${themesHtml}${ideasHtml}`;
+  view.innerHTML = `${autopilotHtml}${headerHtml}${draftsHtml}${failedHtml}${lowStockHtml}${priceHtml}${seoHtml}${crmHtml}${orderMailsHtml}${buchhaltungHtml}${buchhaltungSummaryHtml}${themesHtml}${ideasHtml}`;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
@@ -329,6 +354,9 @@ async function renderApprovals(view) {
   view.querySelectorAll('[data-dismiss-crm]').forEach(btn => {
     btn.onclick = () => confirmDismissCrm(Number(btn.dataset.dismissCrm));
   });
+  // Bestellstatus-Mails: Sammel-Freigabe (verschickt alle offenen) → Bestätigung.
+  const sendAllBtn = view.querySelector('[data-send-order-mails-all]');
+  if (sendAllBtn) sendAllBtn.onclick = () => confirmSendOrderMailsBulk();
   // Buchhaltung: Verbuchen (echte, unveränderbare Buchung) → Bestätigung.
   view.querySelectorAll('[data-book]').forEach(btn => {
     btn.onclick = () => confirmBookProposal(Number(btn.dataset.book));
@@ -530,6 +558,38 @@ function confirmDismissCrm(taskId) {
       toast('Verwerfen fehlgeschlagen', err.message, 'error');
     }
     navigateTo('approvals');
+  };
+}
+
+// Sammel-Freigabe der Bestellstatus-Mails: verschickt ALLE offenen Danke-/
+// Versand-Entwürfe auf einmal - echte Aktion nach außen, daher ein klarer
+// "Wirklich?"-Dialog mit Anzahl. Schlägt eine Mail fehl, bleibt genau die
+// offen; die anderen gehen trotzdem raus.
+function confirmSendOrderMailsBulk() {
+  openSheet(`
+    <div class="sheet-title">Alle Bestellstatus-Mails senden?</div>
+    <div class="sheet-sub">Alle offenen Danke- und Versandbestätigungs-Mails gehen jetzt echt an die jeweiligen Kunden raus. Versand lässt sich nicht zurücknehmen.</div>
+    <button class="btn btn-primary btn-full" id="confirmSendOrderMailsBtn" style="margin-bottom:10px">Ja, alle senden</button>
+    <button class="btn btn-glass btn-full" onclick="closeSheet()">Abbrechen</button>
+  `);
+
+  document.getElementById('confirmSendOrderMailsBtn').onclick = async () => {
+    const btn = document.getElementById('confirmSendOrderMailsBtn');
+    btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+    await withActivity(async () => {
+      try {
+        const r = await api('/crm/order-status/send-all', { method: 'POST' });
+        closeSheet();
+        if (r.failed > 0) {
+          toast(`${r.sent} gesendet, ${r.failed} fehlgeschlagen`, 'Fehlgeschlagene Entwürfe bleiben offen und können erneut gesendet werden.', r.sent > 0 ? 'success' : 'error');
+        } else {
+          toast('Gesendet', `${r.sent} Bestellstatus-Mail(s) sind unterwegs.`, 'success');
+        }
+      } catch (err) {
+        toast('Senden fehlgeschlagen', err.message, 'error');
+      }
+      navigateTo('approvals');
+    });
   };
 }
 
