@@ -10,12 +10,13 @@
 async function renderApprovals(view) {
   // Freigaben + Autopilot-Status parallel laden. Der Autopilot-Status
   // darf fehlschlagen, ohne den ganzen Tab zu blockieren.
-  const [data, auto, themes, bilanzData, ustData] = await Promise.all([
+  const [data, auto, themes, bilanzData, ustData, radar] = await Promise.all([
     api('/approvals/pending'),
     api('/autopilot/status').catch(() => null),
     api('/storefront/themes').catch(() => null),
     api('/accounting/reports/bilanz').catch(() => null),
     api('/accounting/reports/ust').catch(() => null),
+    api('/analytics/radar').catch(() => null),
   ]);
   const postDrafts = data.postDrafts || [];
   const failedPosts = data.failedPosts || [];
@@ -50,6 +51,36 @@ async function renderApprovals(view) {
           : 'Entwürfe entstehen aus Vorlagen. Sobald dein KI-Key hinterlegt ist, schreibt Claude sie – ohne dass sich am Ablauf etwas ändert.'}
       </div>
       <button class="btn btn-primary btn-full" id="runAutopilotBtn" style="font-size:13px">${auto.ranToday ? 'Plan aktualisieren' : 'Tagesplan jetzt erstellen'}</button>
+    </div>` : '';
+
+  // ── Heutiger Fokus: die Datenanalyse HINTER dem Tagesplan ──
+  // Zeigt, WARUM der Autopilot vorschlägt, was er vorschlägt: die
+  // Fokus-Produkte aus dem Umsatz-Radar mit echter Begründung (Verkäufe,
+  // Trend, Marge, Bestand) + der stärkste Kanal. Rein informativ - die
+  // Freigabe passiert weiterhin in den Abschnitten darunter.
+  const focusHtml = (radar && Array.isArray(radar.focus) && radar.focus.length) ? `
+    <div class="glass fade-up focus-card" style="padding:16px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+        <div>
+          <div class="vital-label">Heutiger Fokus · Umsatz-Radar</div>
+          <div style="font-weight:600;font-size:15px;margin-top:2px">${radar.source === 'sales' ? 'Das verkauft sich gerade wirklich:' : 'Noch keine Verkaufsdaten – Näherung nach Lagerwert:'}</div>
+        </div>
+        <span class="badge badge-${radar.source === 'sales' ? 'green' : 'gray'}">${radar.source === 'sales' ? 'Echte Verkäufe' : 'Näherung'}</span>
+      </div>
+      ${radar.focus.slice(0, 3).map((f, i) => `
+        <div class="focus-item">
+          <div class="focus-rank">${i + 1}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13.5px">${escapeHtml(f.title || 'Produkt')}</div>
+            <div class="focus-reasons">${(f.reasons || []).map(escapeHtml).join(' · ')}</div>
+          </div>
+        </div>`).join('')}
+      ${radar.bestChannel ? `<div class="row-sub" style="margin-top:10px">📣 Stärkster Kanal (30 Tage): <b>${escapeHtml(radar.bestChannel.channel)}</b> mit ${Number(radar.bestChannel.revenue).toFixed(2)} € zuordenbarem Umsatz (${radar.bestChannel.share} %).</div>` : ''}
+      ${(radar.watchouts && (radar.watchouts.hotButLow.length || radar.watchouts.outOfStock.length)) ? `
+        <div class="row-sub" style="margin-top:6px">⚠️ ${[
+          radar.watchouts.hotButLow.length ? `${radar.watchouts.hotButLow.map(w => escapeHtml(w.title)).join(', ')}: verkauft sich, aber Bestand knapp – erst nachbestellen, dann bewerben` : '',
+          radar.watchouts.outOfStock.length ? `${radar.watchouts.outOfStock.map(w => escapeHtml(w.title)).join(', ')}: ausverkauft, wird nicht beworben` : '',
+        ].filter(Boolean).join(' · ')}</div>` : ''}
     </div>` : '';
 
   // ── Kopf: eine ehrliche Gesamtaussage ──
@@ -400,7 +431,7 @@ async function renderApprovals(view) {
       : '';
 
   view.innerHTML =
-    autopilotHtml + headerHtml
+    autopilotHtml + focusHtml + headerHtml
     + clusterH('🛍', 'Marketing &amp; Social', draftsHtml, failedHtml, ideasHtml)
       + draftsHtml + failedHtml + ideasHtml
     + clusterH('📈', 'Shop &amp; Umsatz', priceHtml, lowStockHtml, reorderHtml, receiptHtml, seoHtml, themesHtml)

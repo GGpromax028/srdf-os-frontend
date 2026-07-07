@@ -97,13 +97,14 @@ async function renderDesktop(view) {
 // jeder Aufruf einzeln abgesichert, damit eine langsame Abteilung nicht
 // die ganze Übersicht blockiert.
 async function renderSystemOverview(view) {
-  const [pending, bilanz, ust, cockpit, activity, automations] = await Promise.all([
+  const [pending, bilanz, ust, cockpit, activity, automations, radar] = await Promise.all([
     api('/approvals/pending').catch(() => ({})),
     api('/accounting/reports/bilanz').catch(() => null),
     api('/accounting/reports/ust').catch(() => null),
     api('/analytics/cockpit?days=30').catch(() => null),
     api('/settings/activity?limit=6').catch(() => []),
     api('/system/automations').catch(() => null),
+    api('/analytics/radar').catch(() => null),
   ]);
 
   const postDrafts             = pending.postDrafts || [];
@@ -135,6 +136,20 @@ async function renderSystemOverview(view) {
     badgeKind = 'amber'; badgeText = 'Wartet auf dich';
     headline = `${totalWaiting} ${totalWaiting === 1 ? 'Sache wartet' : 'Dinge warten'} auf deine Freigabe.`;
   }
+
+  // ── Heutiger Fokus (Umsatz-Radar): das verkauft sich gerade wirklich ──
+  // Ein Streifen mit der Nummer-1-Empfehlung aus der Datenanalyse. Tippen
+  // führt ins Freigabe-Center, wo die passenden Vorschläge warten.
+  const top = radar && Array.isArray(radar.focus) && radar.focus.length ? radar.focus[0] : null;
+  const focusStripHtml = top ? `
+    <div class="section-h">Heutiger Fokus</div>
+    <button class="glass auto-strip" id="overviewToFocus">
+      <div class="auto-strip-main">🎯 <b>${escapeHtml(top.title || 'Produkt')}</b>${radar.source === 'sales' ? '' : ' <span class="badge badge-gray">Näherung</span>'}</div>
+      <div class="auto-strip-sub">
+        ${escapeHtml((top.reasons || []).slice(0, 2).join(' · '))}
+        ${radar.bestChannel ? ` · Stärkster Kanal: ${escapeHtml(radar.bestChannel.channel)}` : ''}
+      </div>
+    </button>` : '';
 
   // ── Abteilungs-Kacheln: Zahl = "wartet auf dich", Tippen = dorthin, wo du handelst ──
   const depts = [
@@ -225,6 +240,7 @@ async function renderSystemOverview(view) {
       <button class="btn btn-primary btn-full" id="overviewToApprovals" style="margin-top:16px;font-size:13px">Zum Freigabe-Center</button>
     </div>
 
+    ${focusStripHtml}
     ${deptGridHtml}
     ${automationOverviewStrip(automations)}
     ${financeHtml}
@@ -235,6 +251,8 @@ async function renderSystemOverview(view) {
 
   document.getElementById('overviewToApprovals').onclick = () => navigateTo('approvals');
   document.getElementById('overviewToDesktop').onclick = () => navigateTo('desktop');
+  const toFocus = document.getElementById('overviewToFocus');
+  if (toFocus) toFocus.onclick = () => navigateTo('approvals');
   const toAuto = document.getElementById('overviewToAutomations');
   if (toAuto) toAuto.onclick = () => navigateTo('automations');
   view.querySelectorAll('[data-dept-tab]').forEach(btn => {
