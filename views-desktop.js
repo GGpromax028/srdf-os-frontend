@@ -17,6 +17,7 @@
 const APPS = {
   overview:    { icon: '◉',  label: 'Übersicht',     sub: 'Alles auf einen Blick',   tab: 'overview' },
   approvals:   { icon: '✓',  label: 'Freigabe',      sub: 'Was auf dich wartet',     tab: 'approvals', badge: true },
+  automations: { icon: '⟳',  label: 'Automatik',     sub: 'Was von selbst läuft',    tab: 'automations' },
   ai:          { icon: '✦',  label: 'Marketing-KI',  sub: 'Texte & Bilder erstellen', tab: 'ai' },
   social:      { icon: '◈',  label: 'Social Media',  sub: 'Kanäle & Beiträge',        tab: 'social' },
   vertrieb:    { icon: '✉',  label: 'Vertrieb',      sub: 'Kunden & Mails',           tab: 'vertrieb' },
@@ -29,7 +30,7 @@ const APPS = {
 
 // Abteilungs-Struktur des Home-Screens (jede Gruppe = ein Bereich).
 const APP_GROUPS = [
-  { title: 'Zentrale',              apps: ['overview', 'approvals'] },
+  { title: 'Zentrale',              apps: ['overview', 'approvals', 'automations'] },
   { title: 'Marketing & Vertrieb',  apps: ['ai', 'social', 'vertrieb'] },
   { title: 'Shop & Finanzen',       apps: ['shopify', 'analytics', 'buchhaltung'] },
   { title: 'System',                apps: ['chat', 'settings'] },
@@ -96,12 +97,13 @@ async function renderDesktop(view) {
 // jeder Aufruf einzeln abgesichert, damit eine langsame Abteilung nicht
 // die ganze Übersicht blockiert.
 async function renderSystemOverview(view) {
-  const [pending, bilanz, ust, cockpit, activity] = await Promise.all([
+  const [pending, bilanz, ust, cockpit, activity, automations] = await Promise.all([
     api('/approvals/pending').catch(() => ({})),
     api('/accounting/reports/bilanz').catch(() => null),
     api('/accounting/reports/ust').catch(() => null),
     api('/analytics/cockpit?days=30').catch(() => null),
     api('/settings/activity?limit=6').catch(() => []),
+    api('/system/automations').catch(() => null),
   ]);
 
   const postDrafts             = pending.postDrafts || [];
@@ -147,7 +149,7 @@ async function renderSystemOverview(view) {
       tab: 'approvals', focus: '📈' },
     { icon: '📒', title: 'Buchhaltung', n: buchhaltungCount,
       hint: buchhaltungCount ? `${buchhaltungCount} Buchung(en) zu bestätigen`
-                             : (ust ? `USt ${ust.periodLabel}: ${ust.zahllastAbs}` : 'Bereit'),
+                             : (ust && ust.zahllastAbs ? `USt ${ust.periodLabel}: ${ust.zahllastAbs}` : 'Bereit'),
       tab: 'buchhaltung' },
   ];
 
@@ -167,6 +169,7 @@ async function renderSystemOverview(view) {
 
   // ── Finanz-Streifen (nur wenn es echte Buchungen gibt) ──
   const hasBooks = bilanz && bilanz.summeAktivaCents > 0;
+  const hasUst = ust && ust.zahllastAbs != null;
   const financeHtml = hasBooks ? `
     <div class="section-h">Finanzen</div>
     <div class="glass fin-strip">
@@ -179,11 +182,11 @@ async function renderSystemOverview(view) {
         <div class="fin-label">${bilanz.jahresergebnisCents >= 0 ? 'Gewinn (GuV)' : 'Verlust (GuV)'}</div>
       </div>
       <div class="fin-cell">
-        <div class="fin-num" style="color:${ust && ust.zahllastCents < 0 ? 'var(--success)' : 'var(--ink)'}">${ust ? escapeHtml(ust.zahllastAbs) : '–'}</div>
-        <div class="fin-label">${ust ? (ust.zahllastCents >= 0 ? 'USt-Zahllast' : 'USt-Erstattung') : 'USt'}</div>
+        <div class="fin-num" style="color:${hasUst && ust.zahllastCents < 0 ? 'var(--success)' : 'var(--ink)'}">${hasUst ? escapeHtml(ust.zahllastAbs) : '–'}</div>
+        <div class="fin-label">${hasUst ? (ust.zahllastCents >= 0 ? 'USt-Zahllast' : 'USt-Erstattung') : 'USt'}</div>
       </div>
     </div>
-    <div class="row-sub" style="margin:8px 6px 0">Buchungs-Zahlen aus deinem Journal. USt-Zeitraum: ${ust ? escapeHtml(ust.periodLabel) : 'aktueller Monat'} · ersetzt keine Steuerberatung.</div>
+    <div class="row-sub" style="margin:8px 6px 0">Buchungs-Zahlen aus deinem Journal. USt-Zeitraum: ${hasUst ? escapeHtml(ust.periodLabel) : 'aktueller Monat'} · ersetzt keine Steuerberatung.</div>
   ` : `
     <div class="section-h">Finanzen</div>
     <div class="glass" style="padding:18px">
@@ -223,6 +226,7 @@ async function renderSystemOverview(view) {
     </div>
 
     ${deptGridHtml}
+    ${automationOverviewStrip(automations)}
     ${financeHtml}
     ${activityHtml}
 
@@ -231,6 +235,8 @@ async function renderSystemOverview(view) {
 
   document.getElementById('overviewToApprovals').onclick = () => navigateTo('approvals');
   document.getElementById('overviewToDesktop').onclick = () => navigateTo('desktop');
+  const toAuto = document.getElementById('overviewToAutomations');
+  if (toAuto) toAuto.onclick = () => navigateTo('automations');
   view.querySelectorAll('[data-dept-tab]').forEach(btn => {
     btn.onclick = () => {
       const focus = btn.dataset.deptFocus;

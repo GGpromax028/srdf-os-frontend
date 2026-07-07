@@ -40,6 +40,7 @@ async function refreshApprovalBadge() {
 const VIEW_TITLES = {
   desktop: ['SRDF-OS', 'Deine Apps'],
   overview: ['Übersicht', 'Dein ganzes System auf einen Blick'],
+  automations: ['Automatik-Zentrale', 'Was SRDF-OS von selbst tut'],
   dashboard: ['Übersicht', 'Alles im Blick'],
   approvals: ['Freigabe-Center', 'Was auf dich wartet'],
   vertrieb: ['Vertrieb & Kunden', 'Mails & Beziehungen'],
@@ -77,6 +78,7 @@ async function navigateTo(tab, opts = {}) {
   try {
     if (renderTab === 'desktop') await renderDesktop(view);
     else if (renderTab === 'overview') await renderSystemOverview(view);
+    else if (renderTab === 'automations') await renderAutomations(view);
     else if (renderTab === 'dashboard') await renderDashboard(view);
     else if (renderTab === 'approvals') await renderApprovals(view);
     else if (renderTab === 'chat') await renderChat(view);
