@@ -12,7 +12,7 @@ const API_BASE = (() => {
 
 const state = {
   token: null,
-  tab: 'dashboard',
+  tab: 'desktop',
   permissions: [],
   socialAccounts: [],
   aiConfigured: false,
@@ -390,7 +390,7 @@ async function showMain() {
   document.getElementById('main').style.display = 'flex';
   await loadGlobalStatus();
   renderTabbar();
-  navigateTo('dashboard');
+  navigateTo('desktop');
 }
 
 async function loadGlobalStatus() {
