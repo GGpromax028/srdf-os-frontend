@@ -1,23 +1,21 @@
 // ═══════════════════════════════════════════════════════════
-// Navigation
+// Navigation · Dock (Desktop-OS)
 // ═══════════════════════════════════════════════════════════
-// Logisch sortiert nach Arbeitsfluss: zuerst entscheiden (Übersicht,
-// Freigabe), dann analysieren (Cockpit, Shopify), dann erstellen/erreichen
-// (Social, KI, Chat), zuletzt verwalten (Einstellungen).
-const TABS = [
-  { id: 'dashboard', icon: '◉', label: 'Übersicht' },
+// Die App wird als "Betriebssystem" bedient: der Home-Screen (⊞ Apps)
+// zeigt alle Abteilungen als Kacheln (siehe views-desktop.js). Das Dock
+// unten bleibt schlank und daumenfreundlich — nur die Dauerbrenner. Jede
+// weitere Abteilung erreichst du über den Home-Screen.
+const DOCK = [
+  { id: 'desktop',  icon: '⊞', label: 'Apps' },
+  { id: 'overview', icon: '◉', label: 'Übersicht' },
   { id: 'approvals', icon: '✓', label: 'Freigabe' },
-  { id: 'analytics', icon: '◭', label: 'Cockpit' },
-  { id: 'shopify', icon: '◫', label: 'Shopify' },
-  { id: 'social', icon: '◈', label: 'Social' },
-  { id: 'ai', icon: '✦', label: 'KI' },
-  { id: 'chat', icon: '◔', label: 'Chat' },
-  { id: 'settings', icon: '⚙', label: 'Einstellungen' },
+  { id: 'chat',     icon: '◔', label: 'Chat' },
+  { id: 'settings', icon: '⚙', label: 'Mehr' },
 ];
 
 function renderTabbar() {
   const bar = document.getElementById('tabbar');
-  bar.innerHTML = TABS.map(t => `
+  bar.innerHTML = DOCK.map(t => `
     <button class="tab ${state.tab === t.id ? 'on' : ''}" data-tab="${t.id}">
       <div class="tab-icon">${t.icon}${t.id === 'approvals' && state.pendingApprovals > 0 ? `<span class="tab-dot">${state.pendingApprovals > 9 ? '9+' : state.pendingApprovals}</span>` : ''}</div>
       <div class="tab-label">${t.label}</div>
@@ -40,8 +38,12 @@ async function refreshApprovalBadge() {
 }
 
 const VIEW_TITLES = {
+  desktop: ['SRDF-OS', 'Deine Apps'],
+  overview: ['Übersicht', 'Dein ganzes System auf einen Blick'],
   dashboard: ['Übersicht', 'Alles im Blick'],
   approvals: ['Freigabe-Center', 'Was auf dich wartet'],
+  vertrieb: ['Vertrieb & Kunden', 'Mails & Beziehungen'],
+  buchhaltung: ['Buchhaltung', 'Zahlen, Belege, USt'],
   chat: ['Chat-Assistent', 'Fragen zu deinem Shop'],
   shopify: ['Shopify', 'Produkte & Bestellungen'],
   social: ['Social Media', 'Verbindungen & Beiträge'],
@@ -50,10 +52,22 @@ const VIEW_TITLES = {
   settings: ['Einstellungen', 'Volle Kontrolle'],
 };
 
-async function navigateTo(tab) {
+// navigateTo(tab, opts)
+// opts.focusCluster: Emoji einer Freigabe-Center-Cluster-Überschrift
+//   (🛍/📈/✉️/📒) — nach dem Rendern wird dorthin gescrollt. So fühlen
+//   sich "Vertrieb" und "Buchhaltung" wie eigene Apps an, obwohl sie
+//   denselben, bereits geprüften Freigabe-Center-Code nutzen.
+async function navigateTo(tab, opts = {}) {
+  // "Vertrieb"/"Buchhaltung" sind eigene Apps, laufen aber über das
+  // Freigabe-Center und springen zu ihrem Cluster.
+  let renderTab = tab;
+  let focusCluster = opts.focusCluster || null;
+  if (tab === 'vertrieb')    { renderTab = 'approvals'; focusCluster = focusCluster || '✉'; }
+  if (tab === 'buchhaltung') { renderTab = 'approvals'; focusCluster = focusCluster || '📒'; }
+
   state.tab = tab;
   renderTabbar();
-  const [title, sub] = VIEW_TITLES[tab];
+  const [title, sub] = VIEW_TITLES[tab] || VIEW_TITLES.desktop;
   document.getElementById('topbarTitle').textContent = title;
   document.getElementById('topbarSub').textContent = sub;
 
@@ -61,14 +75,17 @@ async function navigateTo(tab) {
   view.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
 
   try {
-    if (tab === 'dashboard') await renderDashboard(view);
-    else if (tab === 'approvals') await renderApprovals(view);
-    else if (tab === 'chat') await renderChat(view);
-    else if (tab === 'shopify') await renderShopify(view);
-    else if (tab === 'social') await renderSocial(view);
-    else if (tab === 'analytics') await renderAnalytics(view);
-    else if (tab === 'ai') await renderAi(view);
-    else if (tab === 'settings') await renderSettings(view);
+    if (renderTab === 'desktop') await renderDesktop(view);
+    else if (renderTab === 'overview') await renderSystemOverview(view);
+    else if (renderTab === 'dashboard') await renderDashboard(view);
+    else if (renderTab === 'approvals') await renderApprovals(view);
+    else if (renderTab === 'chat') await renderChat(view);
+    else if (renderTab === 'shopify') await renderShopify(view);
+    else if (renderTab === 'social') await renderSocial(view);
+    else if (renderTab === 'analytics') await renderAnalytics(view);
+    else if (renderTab === 'ai') await renderAi(view);
+    else if (renderTab === 'settings') await renderSettings(view);
+    if (focusCluster) scrollToClusterEmoji(view, focusCluster);
   } catch (err) {
     view.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div><div class="empty-title">Etwas ist schiefgelaufen</div><div class="empty-sub">${escapeHtml(err.message)}</div></div>`;
   }
@@ -76,6 +93,25 @@ async function navigateTo(tab) {
   // Badge auf dem Freigabe-Tab nach jeder Navigation aktualisieren -
   // so verschwindet der Zähler direkt, nachdem du etwas freigegeben hast.
   refreshApprovalBadge();
+}
+
+// Scrollt sanft zur Cluster-Überschrift, die mit dem Emoji beginnt. Die
+// Überschriften im Freigabe-Center tragen kein festes id-Attribut, darum
+// suchen wir das kleine Emoji-<span> und scrollen dessen Überschrift an.
+// Fehlt der Cluster (weil dort nichts ansteht), bleibt die Seite oben —
+// bewusst leise, kein Fehler.
+function scrollToClusterEmoji(view, emoji) {
+  requestAnimationFrame(() => {
+    const spans = view.querySelectorAll('span');
+    for (const s of spans) {
+      const t = (s.textContent || '').trim();
+      const styled = (s.parentElement && s.parentElement.getAttribute('style')) || '';
+      if (t.startsWith(emoji) && /uppercase/.test(styled)) {
+        s.parentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
