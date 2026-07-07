@@ -10,11 +10,12 @@
 async function renderApprovals(view) {
   // Freigaben + Autopilot-Status parallel laden. Der Autopilot-Status
   // darf fehlschlagen, ohne den ganzen Tab zu blockieren.
-  const [data, auto, themes, bilanzData] = await Promise.all([
+  const [data, auto, themes, bilanzData, ustData] = await Promise.all([
     api('/approvals/pending'),
     api('/autopilot/status').catch(() => null),
     api('/storefront/themes').catch(() => null),
     api('/accounting/reports/bilanz').catch(() => null),
+    api('/accounting/reports/ust').catch(() => null),
   ]);
   const postDrafts = data.postDrafts || [];
   const failedPosts = data.failedPosts || [];
@@ -360,6 +361,23 @@ async function renderApprovals(view) {
       <div class="row-sub" style="padding:10px 14px 4px">„Wareneingang buchen" erfasst die Lieferanten-Rechnung und legt einen Wareneinkaufs-Buchungsvorschlag an – der Lagerbestand bleibt in Shopify, hier wird nichts automatisch verbucht.</div>
     </div>` : '';
 
+  // ── USt-Voranmeldung (read-only Auswertung, Zeitraum umschaltbar) ──
+  // Zeigt Umsatzsteuer − Vorsteuer = Zahllast/Erstattung für einen Zeitraum.
+  // Erscheint, sobald überhaupt etwas gebucht ist (gleiches Signal wie die
+  // Buchhaltungs-Stand-Kachel). Der Zeitraum-Umschalter lädt nur diese Kachel neu.
+  const ustHtml = (ustData && bilanzData && bilanzData.summeAktivaCents > 0) ? `
+    <div class="glass" style="margin-bottom:14px;padding:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+        <div class="vital-label">USt-Voranmeldung</div>
+        <div style="display:flex;gap:5px">
+          <button class="btn btn-glass" style="padding:5px 9px;font-size:11px" data-ust-period="month">Monat</button>
+          <button class="btn btn-glass" style="padding:5px 9px;font-size:11px" data-ust-period="prevmonth">Vormonat</button>
+          <button class="btn btn-glass" style="padding:5px 9px;font-size:11px" data-ust-period="quarter">Quartal</button>
+        </div>
+      </div>
+      <div id="ustCardInner">${ustCardInner(ustData)}</div>
+    </div>` : '';
+
   // ── Kampagnen-Ideen (informativ) ──
   const ideasHtml = seasonalIdeas.length ? `
     <div class="section-h">Kampagnen-Ideen</div>
@@ -389,8 +407,8 @@ async function renderApprovals(view) {
       + priceHtml + lowStockHtml + reorderHtml + receiptHtml + seoHtml + themesHtml
     + clusterH('✉️', 'Kunden', crmHtml, orderMailsHtml)
       + crmHtml + orderMailsHtml
-    + clusterH('📒', 'Buchhaltung', expenseTriggerHtml, buchhaltungHtml, buchhaltungSummaryHtml)
-      + expenseTriggerHtml + buchhaltungHtml + buchhaltungSummaryHtml;
+    + clusterH('📒', 'Buchhaltung', expenseTriggerHtml, buchhaltungHtml, buchhaltungSummaryHtml, ustHtml)
+      + expenseTriggerHtml + buchhaltungHtml + buchhaltungSummaryHtml + ustHtml;
 
   // ── Autopilot: Tagesplan jetzt erstellen ──
   // Legt nur Entwürfe/Vorschläge an - nichts geht live. Danach neu
@@ -473,6 +491,11 @@ async function renderApprovals(view) {
   // Buchungsvorschlag an – verbucht wird erst nach Freigabe).
   const addExpenseBtn = document.getElementById('addExpenseBtn');
   if (addExpenseBtn) addExpenseBtn.onclick = () => openExpenseForm();
+
+  // USt-Voranmeldung: Zeitraum umschalten (lädt nur diese eine Kachel neu).
+  view.querySelectorAll('[data-ust-period]').forEach(btn => {
+    btn.onclick = () => loadUstReport(btn.dataset.ustPeriod);
+  });
 
   const goShopifyBtn = document.getElementById('goShopifyBtn');
   if (goShopifyBtn) goShopifyBtn.onclick = () => navigateTo('shopify');
@@ -832,6 +855,45 @@ async function openExpenseForm() {
     }
     navigateTo('approvals');
   };
+}
+
+// Rendert den Inhalt der USt-Voranmeldungs-Kachel (Umsatzsteuer − Vorsteuer =
+// Zahllast/Erstattung) für einen Zeitraum. Rein informativ, keine Aktion.
+function ustCardInner(d) {
+  const isZahllast = d.zahllastCents >= 0;
+  return `
+    <div class="row-sub" style="margin-bottom:8px">Zeitraum: <b>${escapeHtml(d.periodLabel)}</b></div>
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;gap:10px"><span>Umsatzsteuer (vereinnahmt)</span><span style="font-variant-numeric:tabular-nums;font-weight:600">${escapeHtml(d.summeUmsatzsteuer)}</span></div>
+      <div style="display:flex;justify-content:space-between;gap:10px"><span>− Vorsteuer (abziehbar)</span><span style="font-variant-numeric:tabular-nums;font-weight:600">${escapeHtml(d.summeVorsteuer)}</span></div>
+      <div style="height:1px;background:var(--glass-fill-strong);margin:2px 0"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <span style="font-weight:700">${isZahllast ? 'Zahllast ans Finanzamt' : 'Erstattung'}</span>
+        <span style="font-variant-numeric:tabular-nums;font-weight:700;color:${isZahllast ? 'var(--danger)' : 'var(--signal-green, #16a34a)'}">${escapeHtml(d.zahllastAbs)}</span>
+      </div>
+    </div>
+    <div class="row-sub" style="margin-top:10px">Netto-Umsätze im Zeitraum: ${escapeHtml(d.summeErloese)}. Ehrliche Auswertung deiner Buchungen – ersetzt keine Steuerberatung.</div>`;
+}
+
+// Lädt die USt-Kachel für einen anderen Zeitraum nach (Monat/Vormonat/Quartal)
+// und ersetzt nur den Kachel-Inhalt – der Rest des Freigabe-Centers bleibt stehen.
+async function loadUstReport(period) {
+  const now = new Date();
+  let qs = '';
+  if (period === 'quarter') {
+    qs = `?year=${now.getFullYear()}&quarter=${Math.floor(now.getMonth() / 3) + 1}`;
+  } else if (period === 'prevmonth') {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    qs = `?year=${d.getFullYear()}&month=${d.getMonth() + 1}`;
+  } // 'month' → ohne Parameter = aktueller Kalendermonat
+  const inner = document.getElementById('ustCardInner');
+  if (inner) inner.innerHTML = '<div class="spinner"></div>';
+  try {
+    const d = await api(`/accounting/reports/ust${qs}`);
+    if (inner) inner.innerHTML = ustCardInner(d);
+  } catch (err) {
+    if (inner) inner.innerHTML = `<div class="row-sub">Konnte nicht geladen werden: ${escapeHtml(err.message)}</div>`;
+  }
 }
 
 // Nachbestellung als "bestellt" markieren – deine Einkaufs-Entscheidung.
