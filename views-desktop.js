@@ -128,7 +128,7 @@ async function renderDesktop(view) {
 // jeder Aufruf einzeln abgesichert, damit eine langsame Abteilung nicht
 // die ganze Übersicht blockiert.
 async function renderSystemOverview(view) {
-  const [pending, bilanz, ust, cockpit, activity, automations, radar, registry] = await Promise.all([
+  const [pending, bilanz, ust, cockpit, activity, automations, radar, registry, missions, briefing] = await Promise.all([
     api('/approvals/pending').catch(() => ({})),
     api('/accounting/reports/bilanz').catch(() => null),
     api('/accounting/reports/ust').catch(() => null),
@@ -137,6 +137,8 @@ async function renderSystemOverview(view) {
     api('/system/automations').catch(() => null),
     api('/analytics/radar').catch(() => null),
     api('/system/apps').catch(() => null),
+    api('/system/missions-log').catch(() => null),
+    api('/system/briefing').catch(() => null),
   ]);
 
   const postDrafts             = pending.postDrafts || [];
@@ -168,6 +170,26 @@ async function renderSystemOverview(view) {
     badgeKind = 'amber'; badgeText = 'Wartet auf dich';
     headline = `${totalWaiting} ${totalWaiting === 1 ? 'Sache wartet' : 'Dinge warten'} auf deine Freigabe.`;
   }
+
+  // ── Manager-Briefing: die 3 wichtigsten Hebel heute ──
+  // Deterministisch vom Server berechnet (Radar + offene Aufgaben +
+  // Segmente), jeder Hebel mit echter Begründung und Sprung-Ziel.
+  // Nichts Dringendes oder Endpunkt nicht erreichbar → Karte weglassen.
+  const briefingHtml = (briefing && Array.isArray(briefing.levers) && briefing.levers.length) ? `
+    <div class="section-h">Manager-Briefing · Hebel heute</div>
+    <div class="glass">
+      ${briefing.levers.map(l => `
+        <button class="lever-row" data-lever-tab="${escapeHtml(l.action.tab)}" data-lever-focus="${l.action.focus || ''}">
+          <span class="focus-rank">${l.rank}</span>
+          <span class="row-text">
+            <span class="row-title">${escapeHtml(l.title)}</span>
+            <span class="row-sub">${escapeHtml(l.why)}</span>
+          </span>
+          <span class="lever-go">${escapeHtml(l.action.label)} ›</span>
+        </button>`).join('')}
+      <div id="briefingInsightOut"></div>
+      <button class="btn btn-glass" id="briefingInsightBtn" style="font-size:12px;margin:6px 12px 12px;width:calc(100% - 24px)">✦ KI-Kurzfassung</button>
+    </div>` : '';
 
   // ── Heutiger Fokus (Umsatz-Radar): das verkauft sich gerade wirklich ──
   // Ein Streifen mit der Nummer-1-Empfehlung aus der Datenanalyse. Tippen
@@ -214,7 +236,7 @@ async function renderSystemOverview(view) {
   }
 
   const deptGridHtml = `
-    <div class="section-h">Abteilungen</div>
+    <div class="section-h">Wartet auf dich</div>
     <div class="dept-grid">
       ${depts.map(d => `
         <button class="dept-card glass" data-dept-tab="${d.tab}" data-dept-focus="${d.focus || ''}">
@@ -255,11 +277,33 @@ async function renderSystemOverview(view) {
       <div class="row-sub">Noch keine Buchungen erfasst. Sobald Umsätze, Einkäufe oder Ausgaben gebucht sind, erscheinen hier GuV, Umsatz und USt auf einen Blick.</div>
     </div>`;
 
-  // ── Letzte Aktivität (echt protokolliert) ──
-  const activityHtml = `
-    <div class="section-h">Letzte Aktivität</div>
+  // ── Missions-Log · Spur 1: was heute wirklich von selbst lief ──
+  // Quelle: activity_log-Einträge 'automation_run' (recordRun schreibt sie
+  // bei jedem echten Lauf). Endpunkt nicht erreichbar → Spur weglassen,
+  // nie etwas erfinden.
+  const todayRuns = (missions && Array.isArray(missions.todayRuns)) ? missions.todayRuns : null;
+  const todayHtml = todayRuns ? `
+    <div class="section-h">Heute automatisch gelaufen</div>
     <div class="glass">
-      ${(activity && activity.length) ? activity.map(e => `
+      ${todayRuns.length ? todayRuns.map(r => `
+        <div class="row">
+          <div class="row-icon">${r.success ? '✓' : '⚠'}</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(r.detail || 'Automatik-Lauf')}</div>
+            <div class="row-sub">${formatRelativeTime(r.created_at)}</div>
+          </div>
+        </div>`).join('')
+      : `<div class="empty"><div class="empty-icon">⟳</div><div class="empty-title">Heute noch nichts von selbst gelaufen</div><div class="empty-sub">Sobald eine Automatik wirklich läuft, steht sie hier — echt protokolliert. Die Zeitpläne zeigt die Automatik-App.</div></div>`}
+    </div>` : '';
+
+  // ── Missions-Log · Spur 3: zuletzt Erledigtes (ohne Automatik-Routine) ──
+  // Bevorzugt die gefilterte Erledigt-Spur; fällt der Missions-Endpunkt
+  // aus, bleibt das bisherige ungefilterte Protokoll als Fallback.
+  const doneEntries = (missions && Array.isArray(missions.done)) ? missions.done : (activity || []);
+  const activityHtml = `
+    <div class="section-h">Zuletzt erledigt</div>
+    <div class="glass">
+      ${doneEntries.length ? doneEntries.map(e => `
         <div class="row">
           <div class="row-icon">${e.success ? '✓' : '⚠'}</div>
           <div class="row-text">
@@ -267,7 +311,7 @@ async function renderSystemOverview(view) {
             <div class="row-sub">${escapeHtml(e.detail || '')}${e.detail ? ' · ' : ''}${formatRelativeTime(e.created_at)}</div>
           </div>
         </div>`).join('')
-      : `<div class="empty"><div class="empty-icon">○</div><div class="empty-title">Noch keine Aktivität</div><div class="empty-sub">Sobald du etwas tust, erscheint es hier — echt protokolliert, nichts simuliert.</div></div>`}
+      : `<div class="empty"><div class="empty-icon">○</div><div class="empty-title">Noch nichts erledigt</div><div class="empty-sub">Sobald du etwas freigibst oder das System etwas für dich abschließt, erscheint es hier — echt protokolliert, nichts simuliert.</div></div>`}
     </div>`;
 
   view.innerHTML = `
@@ -287,9 +331,11 @@ async function renderSystemOverview(view) {
       <button class="btn btn-primary btn-full" id="overviewToApprovals" style="margin-top:16px;font-size:13px">Zum Freigabe-Center</button>
     </div>
 
+    ${briefingHtml}
     ${focusStripHtml}
     ${deptGridHtml}
     ${automationOverviewStrip(automations)}
+    ${todayHtml}
     ${financeHtml}
     ${activityHtml}
 
@@ -308,4 +354,29 @@ async function renderSystemOverview(view) {
       navigateTo(btn.dataset.deptTab, focus ? { focusCluster: focus } : {});
     };
   });
+  view.querySelectorAll('[data-lever-tab]').forEach(btn => {
+    btn.onclick = () => {
+      const focus = btn.dataset.leverFocus;
+      navigateTo(btn.dataset.leverTab, focus ? { focusCluster: focus } : {});
+    };
+  });
+  // KI-Kurzfassung nur auf Knopfdruck (kostet ggf. KI-Budget). Ohne Key
+  // antwortet der Server ehrlich configured:false — dann sagen wir das.
+  const insightBtn = document.getElementById('briefingInsightBtn');
+  if (insightBtn) insightBtn.onclick = async () => {
+    insightBtn.disabled = true;
+    insightBtn.textContent = 'KI fasst zusammen …';
+    try {
+      const r = await api('/system/briefing/insight', { method: 'POST' });
+      const out = document.getElementById('briefingInsightOut');
+      out.innerHTML = `<div class="row-sub" style="padding:2px 14px 6px">${
+        r.configured ? escapeHtml(r.insight)
+        : 'KI noch nicht aktiviert — die Hebel oben sind bereits die vollständige, deterministische Analyse.'
+      }</div>`;
+      insightBtn.style.display = 'none';
+    } catch (err) {
+      insightBtn.disabled = false;
+      insightBtn.textContent = '✦ KI-Kurzfassung';
+    }
+  };
 }
