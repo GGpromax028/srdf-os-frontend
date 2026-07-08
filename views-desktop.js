@@ -10,9 +10,12 @@
 // live — die Kacheln öffnen nur Ansichten, freigegeben wird weiter
 // ausschließlich im Freigabe-Center.
 
-// ── App-Register ──
-// tab = Ziel für navigateTo(). Alles Zusammengehörige einer Abteilung
-// steckt hinter einer Kachel. "vertrieb"/"buchhaltung" öffnen das
+// ── App-Register (FALLBACK) ──
+// Die maßgebliche Quelle ist seit der App-Plattform der Server:
+// GET /api/system/apps (backend/src/services/appRegistry.js). Dieses
+// statische Register dient nur noch als Fallback, wenn der Aufruf
+// ausfällt (offline/PWA-Start) — der Desktop bleibt immer benutzbar.
+// tab = Ziel für navigateTo(). "vertrieb"/"buchhaltung" öffnen das
 // Freigabe-Center, gezielt an ihrem Cluster (siehe navigateTo).
 const APPS = {
   overview:    { icon: '◉',  label: 'Übersicht',     sub: 'Alles auf einen Blick',   tab: 'overview' },
@@ -48,15 +51,59 @@ function greetingByHour() {
 // ═══════════════════════════════════════════════════════════
 // HOME-SCREEN (App-Launcher)
 // ═══════════════════════════════════════════════════════════
+// Eine App-Kachel. count = ehrlicher "wartet auf dich"-Zähler
+// (null/0 = kein Badge — nie eine erfundene Zahl).
+function appTileHtml(id, a, count) {
+  const badge = (count > 0)
+    ? `<span class="app-tile-badge">${count > 99 ? '99+' : count}</span>` : '';
+  return `
+    <button class="app-tile glass" data-app="${id}">
+      <span class="app-tile-icon">${a.icon}${badge}</span>
+      <span class="app-tile-label">${escapeHtml(a.label)}</span>
+      <span class="app-tile-sub">${escapeHtml(a.sub)}</span>
+    </button>`;
+}
+
 async function renderDesktop(view) {
-  // Leise den Freigabe-Zähler laden, damit die Kachel ein Badge zeigt.
-  // Schlägt es fehl, bleibt einfach der letzte bekannte Wert.
-  let pending = state.pendingApprovals || 0;
-  try {
-    const { actionableCount } = await api('/approvals/count');
-    pending = actionableCount;
-    state.pendingApprovals = actionableCount;
-  } catch { /* still */ }
+  // Das App-Register kommt vom Server (App-Plattform): EINE Quelle für
+  // Kacheln, Gruppen und Zähler — jede dort registrierte App erscheint
+  // hier automatisch. Fällt der Aufruf aus, rendert das statische
+  // Fallback-Register mit dem Freigabe-Zähler wie bisher.
+  let registry = null;
+  try { registry = await api('/system/apps'); } catch { /* Fallback unten */ }
+
+  let groupsHtml;
+  const tabById = {};
+
+  if (registry && Array.isArray(registry.apps) && registry.apps.length) {
+    const appById = {};
+    registry.apps.forEach(a => { appById[a.id] = a; tabById[a.id] = a.tab; });
+    if (appById.approvals && appById.approvals.pendingCount != null) {
+      state.pendingApprovals = appById.approvals.pendingCount;
+    }
+    groupsHtml = (registry.groups || []).map(g => `
+      <div class="desktop-section">${escapeHtml(g.title)}</div>
+      <div class="app-grid">
+        ${g.apps.map(id => appById[id]).filter(Boolean)
+          .map(a => appTileHtml(a.id, a, a.pendingCount)).join('')}
+      </div>
+    `).join('');
+  } else {
+    // Fallback: statisches Register + schlanker Freigabe-Zähler.
+    let pending = state.pendingApprovals || 0;
+    try {
+      const { actionableCount } = await api('/approvals/count');
+      pending = actionableCount;
+      state.pendingApprovals = actionableCount;
+    } catch { /* still */ }
+    Object.keys(APPS).forEach(id => { tabById[id] = APPS[id].tab; });
+    groupsHtml = APP_GROUPS.map(g => `
+      <div class="desktop-section">${g.title}</div>
+      <div class="app-grid">
+        ${g.apps.map(id => appTileHtml(id, APPS[id], APPS[id].badge ? pending : 0)).join('')}
+      </div>
+    `).join('');
+  }
 
   view.innerHTML = `
     <div class="desktop fade-up">
@@ -65,27 +112,11 @@ async function renderDesktop(view) {
         <div class="desktop-hero-title">${greetingByHour()}</div>
         <div class="desktop-hero-sub">Wähle eine App. Alles Zusammengehörige liegt an einem Ort — und nichts geht ohne deine Freigabe live.</div>
       </div>
-
-      ${APP_GROUPS.map(g => `
-        <div class="desktop-section">${g.title}</div>
-        <div class="app-grid">
-          ${g.apps.map(id => {
-            const a = APPS[id];
-            const badge = (a.badge && pending > 0)
-              ? `<span class="app-tile-badge">${pending > 99 ? '99+' : pending}</span>` : '';
-            return `
-              <button class="app-tile glass" data-app="${id}">
-                <span class="app-tile-icon">${a.icon}${badge}</span>
-                <span class="app-tile-label">${escapeHtml(a.label)}</span>
-                <span class="app-tile-sub">${escapeHtml(a.sub)}</span>
-              </button>`;
-          }).join('')}
-        </div>
-      `).join('')}
+      ${groupsHtml}
     </div>`;
 
   view.querySelectorAll('[data-app]').forEach(btn => {
-    btn.onclick = () => navigateTo(APPS[btn.dataset.app].tab);
+    btn.onclick = () => navigateTo(tabById[btn.dataset.app] || 'desktop');
   });
 }
 
@@ -97,7 +128,7 @@ async function renderDesktop(view) {
 // jeder Aufruf einzeln abgesichert, damit eine langsame Abteilung nicht
 // die ganze Übersicht blockiert.
 async function renderSystemOverview(view) {
-  const [pending, bilanz, ust, cockpit, activity, automations, radar] = await Promise.all([
+  const [pending, bilanz, ust, cockpit, activity, automations, radar, registry] = await Promise.all([
     api('/approvals/pending').catch(() => ({})),
     api('/accounting/reports/bilanz').catch(() => null),
     api('/accounting/reports/ust').catch(() => null),
@@ -105,6 +136,7 @@ async function renderSystemOverview(view) {
     api('/settings/activity?limit=6').catch(() => []),
     api('/system/automations').catch(() => null),
     api('/analytics/radar').catch(() => null),
+    api('/system/apps').catch(() => null),
   ]);
 
   const postDrafts             = pending.postDrafts || [];
@@ -152,21 +184,34 @@ async function renderSystemOverview(view) {
     </button>` : '';
 
   // ── Abteilungs-Kacheln: Zahl = "wartet auf dich", Tippen = dorthin, wo du handelst ──
-  const depts = [
-    { icon: '🛍', title: 'Marketing & Social', n: marketingCount,
-      hint: marketingCount ? `${marketingCount} zur Freigabe` : 'Nichts offen',
-      tab: 'approvals', focus: '🛍' },
-    { icon: '✉️', title: 'Vertrieb & Kunden', n: vertriebCount,
-      hint: vertriebCount ? `${vertriebCount} Kunden-Mail(s) im Entwurf` : 'Keine offenen Mails',
-      tab: 'vertrieb' },
-    { icon: '📈', title: 'Shop & Umsatz', n: shopCount,
-      hint: shopCount ? `${shopCount}× Bestand / Preis / Einkauf` : 'Bestand ok',
-      tab: 'approvals', focus: '📈' },
-    { icon: '📒', title: 'Buchhaltung', n: buchhaltungCount,
-      hint: buchhaltungCount ? `${buchhaltungCount} Buchung(en) zu bestätigen`
-                             : (ust && ust.zahllastAbs ? `USt ${ust.periodLabel}: ${ust.zahllastAbs}` : 'Bereit'),
-      tab: 'buchhaltung' },
-  ];
+  // Die Karten kommen aus dem Server-Register (App-Plattform): eine neue
+  // Abteilung erscheint hier automatisch. Fallback = die bekannten vier.
+  let depts;
+  if (registry && Array.isArray(registry.departments) && registry.departments.length) {
+    depts = registry.departments.map(d => ({
+      icon: d.icon, title: d.title, n: d.pendingCount, tab: d.tab, focus: d.focus,
+      // Sonderfall: Buchhaltung ohne offene Buchungen zeigt die USt des
+      // Zeitraums (die Info hat die Übersicht ohnehin schon geladen).
+      hint: (d.id === 'buchhaltung' && d.pendingCount === 0 && ust && ust.zahllastAbs)
+        ? `USt ${ust.periodLabel}: ${ust.zahllastAbs}` : d.hint,
+    }));
+  } else {
+    depts = [
+      { icon: '🛍', title: 'Marketing & Social', n: marketingCount,
+        hint: marketingCount ? `${marketingCount} zur Freigabe` : 'Nichts offen',
+        tab: 'approvals', focus: '🛍' },
+      { icon: '✉️', title: 'Vertrieb & Kunden', n: vertriebCount,
+        hint: vertriebCount ? `${vertriebCount} Kunden-Mail(s) im Entwurf` : 'Keine offenen Mails',
+        tab: 'vertrieb' },
+      { icon: '📈', title: 'Shop & Umsatz', n: shopCount,
+        hint: shopCount ? `${shopCount}× Bestand / Preis / Einkauf` : 'Bestand ok',
+        tab: 'approvals', focus: '📈' },
+      { icon: '📒', title: 'Buchhaltung', n: buchhaltungCount,
+        hint: buchhaltungCount ? `${buchhaltungCount} Buchung(en) zu bestätigen`
+                               : (ust && ust.zahllastAbs ? `USt ${ust.periodLabel}: ${ust.zahllastAbs}` : 'Bereit'),
+        tab: 'buchhaltung' },
+    ];
+  }
 
   const deptGridHtml = `
     <div class="section-h">Abteilungen</div>
@@ -175,7 +220,9 @@ async function renderSystemOverview(view) {
         <button class="dept-card glass" data-dept-tab="${d.tab}" data-dept-focus="${d.focus || ''}">
           <div class="dept-card-top">
             <span class="dept-card-icon">${d.icon}</span>
-            ${d.n > 0 ? `<span class="badge badge-amber">${d.n}</span>` : `<span class="badge badge-gray">ok</span>`}
+            ${d.n == null ? `<span class="badge badge-gray">–</span>`
+              : d.n > 0 ? `<span class="badge badge-amber">${d.n}</span>`
+              : `<span class="badge badge-gray">ok</span>`}
           </div>
           <div class="dept-card-title">${escapeHtml(d.title)}</div>
           <div class="dept-card-hint">${escapeHtml(d.hint)}</div>
