@@ -1,336 +1,335 @@
 // ═══════════════════════════════════════════════════════════
-// Navigation · Dock (Desktop-OS)
+// SRDF-OS · Desktop-Ebene (App-Launcher + System-Übersicht)
 // ═══════════════════════════════════════════════════════════
-// Die App wird als "Betriebssystem" bedient: der Home-Screen (⊞ Apps)
-// zeigt alle Abteilungen als Kacheln (siehe views-desktop.js). Das Dock
-// unten bleibt schlank und daumenfreundlich — nur die Dauerbrenner. Jede
-// weitere Abteilung erreichst du über den Home-Screen.
-const DOCK = [
-  { id: 'desktop',  icon: '⊞', label: 'Apps' },
-  { id: 'overview', icon: '◉', label: 'Übersicht' },
-  { id: 'approvals', icon: '✓', label: 'Freigabe' },
-  { id: 'chat',     icon: '◔', label: 'Chat' },
-  { id: 'settings', icon: '⚙', label: 'Mehr' },
-];
+// Macht aus der flachen Tab-Leiste ein echtes "Betriebssystem":
+// ein Home-Screen mit App-Kacheln je Abteilung + eine Übersichts-App,
+// die das ganze System auf einer Seite zusammenfasst.
+//
+// WICHTIG: Rein Frontend. Ruft nur BESTEHENDE Endpunkte auf, zeigt nur
+// echte Zahlen vom Server (nichts simuliert). Keine neue Aktion geht
+// live — die Kacheln öffnen nur Ansichten, freigegeben wird weiter
+// ausschließlich im Freigabe-Center.
 
-function renderTabbar() {
-  const bar = document.getElementById('tabbar');
-  bar.innerHTML = DOCK.map(t => `
-    <button class="tab ${state.tab === t.id ? 'on' : ''}" data-tab="${t.id}">
-      <div class="tab-icon">${t.icon}${t.id === 'approvals' && state.pendingApprovals > 0 ? `<span class="tab-dot">${state.pendingApprovals > 9 ? '9+' : state.pendingApprovals}</span>` : ''}</div>
-      <div class="tab-label">${t.label}</div>
-    </button>`).join('');
-
-  bar.querySelectorAll('.tab').forEach(btn => {
-    btn.onclick = () => navigateTo(btn.dataset.tab);
-  });
-}
-
-// Lädt nur den kleinen Zähler für das Badge auf dem Freigabe-Tab und
-// zeichnet die Tab-Leiste neu. Bewusst leise: schlägt der Aufruf fehl,
-// bleibt einfach das alte Badge stehen, statt einen Fehler zu zeigen.
-async function refreshApprovalBadge() {
-  try {
-    const { actionableCount } = await api('/approvals/count');
-    state.pendingApprovals = actionableCount;
-    renderTabbar();
-  } catch { /* still ignorieren */ }
-}
-
-const VIEW_TITLES = {
-  desktop: ['SRDF-OS', 'Deine Apps'],
-  overview: ['Übersicht', 'Dein ganzes System auf einen Blick'],
-  automations: ['Automatik-Zentrale', 'Was SRDF-OS von selbst tut'],
-  dashboard: ['Übersicht', 'Alles im Blick'],
-  approvals: ['Freigabe-Center', 'Was auf dich wartet'],
-  vertrieb: ['Vertrieb & Kunden', 'Mails & Beziehungen'],
-  buchhaltung: ['Buchhaltung', 'Zahlen, Belege, USt'],
-  chat: ['Chat-Assistent', 'Fragen zu deinem Shop'],
-  shopify: ['Shopify', 'Produkte & Bestellungen'],
-  social: ['Social Media', 'Verbindungen & Beiträge'],
-  analytics: ['Analytics-Cockpit', 'Was bringt wirklich Geld?'],
-  ai: ['KI-Werkzeuge', 'Echte Claude-Generierung'],
-  settings: ['Einstellungen', 'Volle Kontrolle'],
+// ── App-Register (FALLBACK) ──
+// Die maßgebliche Quelle ist seit der App-Plattform der Server:
+// GET /api/system/apps (backend/src/services/appRegistry.js). Dieses
+// statische Register dient nur noch als Fallback, wenn der Aufruf
+// ausfällt (offline/PWA-Start) — der Desktop bleibt immer benutzbar.
+// tab = Ziel für navigateTo(). "vertrieb"/"buchhaltung" öffnen das
+// Freigabe-Center, gezielt an ihrem Cluster (siehe navigateTo).
+const APPS = {
+  overview:    { icon: '◉',  label: 'Übersicht',     sub: 'Alles auf einen Blick',   tab: 'overview' },
+  approvals:   { icon: '✓',  label: 'Freigabe',      sub: 'Was auf dich wartet',     tab: 'approvals', badge: true },
+  automations: { icon: '⟳',  label: 'Automatik',     sub: 'Was von selbst läuft',    tab: 'automations' },
+  ai:          { icon: '✦',  label: 'Marketing-KI',  sub: 'Texte & Bilder erstellen', tab: 'ai' },
+  social:      { icon: '◈',  label: 'Social Media',  sub: 'Kanäle & Beiträge',        tab: 'social' },
+  vertrieb:    { icon: '✉',  label: 'Vertrieb',      sub: 'Kunden & Mails',           tab: 'vertrieb' },
+  shopify:     { icon: '◫',  label: 'Shopify',       sub: 'Produkte & Bestellungen',  tab: 'shopify' },
+  analytics:   { icon: '◭',  label: 'Cockpit',       sub: 'Was bringt Geld?',         tab: 'analytics' },
+  buchhaltung: { icon: '📒', label: 'Buchhaltung',   sub: 'Zahlen, Belege, USt',      tab: 'buchhaltung' },
+  chat:        { icon: '◔',  label: 'Chat',          sub: 'Frag deinen Shop',         tab: 'chat' },
+  settings:    { icon: '⚙',  label: 'Einstellungen', sub: 'Volle Kontrolle',          tab: 'settings' },
 };
 
-// navigateTo(tab, opts)
-// opts.focusCluster: Emoji einer Freigabe-Center-Cluster-Überschrift
-//   (🛍/📈/✉️/📒) — nach dem Rendern wird dorthin gescrollt. So fühlen
-//   sich "Vertrieb" und "Buchhaltung" wie eigene Apps an, obwohl sie
-//   denselben, bereits geprüften Freigabe-Center-Code nutzen.
-async function navigateTo(tab, opts = {}) {
-  // "Vertrieb"/"Buchhaltung" sind eigene Apps, laufen aber über das
-  // Freigabe-Center und springen zu ihrem Cluster.
-  let renderTab = tab;
-  let focusCluster = opts.focusCluster || null;
-  if (tab === 'vertrieb')    { renderTab = 'approvals'; focusCluster = focusCluster || '✉'; }
-  if (tab === 'buchhaltung') { renderTab = 'approvals'; focusCluster = focusCluster || '📒'; }
+// Abteilungs-Struktur des Home-Screens (jede Gruppe = ein Bereich).
+const APP_GROUPS = [
+  { title: 'Zentrale',              apps: ['overview', 'approvals', 'automations'] },
+  { title: 'Marketing & Vertrieb',  apps: ['ai', 'social', 'vertrieb'] },
+  { title: 'Shop & Finanzen',       apps: ['shopify', 'analytics', 'buchhaltung'] },
+  { title: 'System',                apps: ['chat', 'settings'] },
+];
 
-  state.tab = tab;
-  renderTabbar();
-  const [title, sub] = VIEW_TITLES[tab] || VIEW_TITLES.desktop;
-  document.getElementById('topbarTitle').textContent = title;
-  document.getElementById('topbarSub').textContent = sub;
-
-  const view = document.getElementById('view');
-  view.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
-
-  try {
-    if (renderTab === 'desktop') await renderDesktop(view);
-    else if (renderTab === 'overview') await renderSystemOverview(view);
-    else if (renderTab === 'automations') await renderAutomations(view);
-    else if (renderTab === 'dashboard') await renderDashboard(view);
-    else if (renderTab === 'approvals') await renderApprovals(view);
-    else if (renderTab === 'chat') await renderChat(view);
-    else if (renderTab === 'shopify') await renderShopify(view);
-    else if (renderTab === 'social') await renderSocial(view);
-    else if (renderTab === 'analytics') await renderAnalytics(view);
-    else if (renderTab === 'ai') await renderAi(view);
-    else if (renderTab === 'settings') await renderSettings(view);
-    if (focusCluster) scrollToClusterEmoji(view, focusCluster);
-  } catch (err) {
-    view.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div><div class="empty-title">Etwas ist schiefgelaufen</div><div class="empty-sub">${escapeHtml(err.message)}</div></div>`;
-  }
-
-  // Badge auf dem Freigabe-Tab nach jeder Navigation aktualisieren -
-  // so verschwindet der Zähler direkt, nachdem du etwas freigegeben hast.
-  refreshApprovalBadge();
+function greetingByHour() {
+  const h = new Date().getHours();
+  if (h < 5)  return 'Noch wach?';
+  if (h < 11) return 'Guten Morgen';
+  if (h < 17) return 'Guten Tag';
+  if (h < 22) return 'Guten Abend';
+  return 'Gute Nacht';
 }
 
-// Scrollt sanft zur Cluster-Überschrift, die mit dem Emoji beginnt. Die
-// Überschriften im Freigabe-Center tragen kein festes id-Attribut, darum
-// suchen wir das kleine Emoji-<span> und scrollen dessen Überschrift an.
-// Fehlt der Cluster (weil dort nichts ansteht), bleibt die Seite oben —
-// bewusst leise, kein Fehler.
-function scrollToClusterEmoji(view, emoji) {
-  requestAnimationFrame(() => {
-    const spans = view.querySelectorAll('span');
-    for (const s of spans) {
-      const t = (s.textContent || '').trim();
-      const styled = (s.parentElement && s.parentElement.getAttribute('style')) || '';
-      if (t.startsWith(emoji) && /uppercase/.test(styled)) {
-        s.parentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        return;
-      }
+// ═══════════════════════════════════════════════════════════
+// HOME-SCREEN (App-Launcher)
+// ═══════════════════════════════════════════════════════════
+// Eine App-Kachel. count = ehrlicher "wartet auf dich"-Zähler
+// (null/0 = kein Badge — nie eine erfundene Zahl).
+function appTileHtml(id, a, count) {
+  const badge = (count > 0)
+    ? `<span class="app-tile-badge">${count > 99 ? '99+' : count}</span>` : '';
+  return `
+    <button class="app-tile glass" data-app="${id}">
+      <span class="app-tile-icon">${a.icon}${badge}</span>
+      <span class="app-tile-label">${escapeHtml(a.label)}</span>
+      <span class="app-tile-sub">${escapeHtml(a.sub)}</span>
+    </button>`;
+}
+
+async function renderDesktop(view) {
+  // Das App-Register kommt vom Server (App-Plattform): EINE Quelle für
+  // Kacheln, Gruppen und Zähler — jede dort registrierte App erscheint
+  // hier automatisch. Fällt der Aufruf aus, rendert das statische
+  // Fallback-Register mit dem Freigabe-Zähler wie bisher.
+  let registry = null;
+  try { registry = await api('/system/apps'); } catch { /* Fallback unten */ }
+
+  let groupsHtml;
+  const tabById = {};
+
+  if (registry && Array.isArray(registry.apps) && registry.apps.length) {
+    const appById = {};
+    registry.apps.forEach(a => { appById[a.id] = a; tabById[a.id] = a.tab; });
+    if (appById.approvals && appById.approvals.pendingCount != null) {
+      state.pendingApprovals = appById.approvals.pendingCount;
     }
+    groupsHtml = (registry.groups || []).map(g => `
+      <div class="desktop-section">${escapeHtml(g.title)}</div>
+      <div class="app-grid">
+        ${g.apps.map(id => appById[id]).filter(Boolean)
+          .map(a => appTileHtml(a.id, a, a.pendingCount)).join('')}
+      </div>
+    `).join('');
+  } else {
+    // Fallback: statisches Register + schlanker Freigabe-Zähler.
+    let pending = state.pendingApprovals || 0;
+    try {
+      const { actionableCount } = await api('/approvals/count');
+      pending = actionableCount;
+      state.pendingApprovals = actionableCount;
+    } catch { /* still */ }
+    Object.keys(APPS).forEach(id => { tabById[id] = APPS[id].tab; });
+    groupsHtml = APP_GROUPS.map(g => `
+      <div class="desktop-section">${g.title}</div>
+      <div class="app-grid">
+        ${g.apps.map(id => appTileHtml(id, APPS[id], APPS[id].badge ? pending : 0)).join('')}
+      </div>
+    `).join('');
+  }
+
+  view.innerHTML = `
+    <div class="desktop fade-up">
+      <div class="desktop-hero glass">
+        <div class="desktop-hero-label">SRDF-OS</div>
+        <div class="desktop-hero-title">${greetingByHour()}</div>
+        <div class="desktop-hero-sub">Wähle eine App. Alles Zusammengehörige liegt an einem Ort — und nichts geht ohne deine Freigabe live.</div>
+      </div>
+      ${groupsHtml}
+    </div>`;
+
+  view.querySelectorAll('[data-app]').forEach(btn => {
+    btn.onclick = () => navigateTo(tabById[btn.dataset.app] || 'desktop');
   });
 }
 
 // ═══════════════════════════════════════════════════════════
-// DASHBOARD
+// SYSTEM-ÜBERSICHT (die "Übersichts-App" über das ganze System)
 // ═══════════════════════════════════════════════════════════
-async function renderDashboard(view) {
-  const [posts, history, lowStock, dailyReport, briefing] = await Promise.all([
-    api('/social/posts').catch(() => []),
-    api('/ai/history').catch(() => []),
-    api('/stats/low-stock').catch(() => []),
-    api('/ai/daily-report').catch(() => null),
-    api('/ai/briefing').catch(() => null),
+// Eine Seite, die jede Abteilung zusammenfasst: was wartet, wie stehen
+// die Finanzen, was lief zuletzt. Alles aus bestehenden Endpunkten,
+// jeder Aufruf einzeln abgesichert, damit eine langsame Abteilung nicht
+// die ganze Übersicht blockiert.
+async function renderSystemOverview(view) {
+  const [pending, bilanz, ust, cockpit, activity, automations, radar, registry, missions] = await Promise.all([
+    api('/approvals/pending').catch(() => ({})),
+    api('/accounting/reports/bilanz').catch(() => null),
+    api('/accounting/reports/ust').catch(() => null),
+    api('/analytics/cockpit?days=30').catch(() => null),
+    api('/settings/activity?limit=6').catch(() => []),
+    api('/system/automations').catch(() => null),
+    api('/analytics/radar').catch(() => null),
+    api('/system/apps').catch(() => null),
+    api('/system/missions-log').catch(() => null),
   ]);
 
-  const pendingPosts = posts.filter(p => p.status === 'draft' || p.status === 'scheduled');
-  const failedPosts = posts.filter(p => p.status === 'failed');
-  const publishedToday = posts.filter(p => p.status === 'published' &&
-    new Date(p.published_at).toDateString() === new Date().toDateString());
+  const postDrafts             = pending.postDrafts || [];
+  const failedPosts            = pending.failedPosts || [];
+  const lowStock               = pending.lowStock || [];
+  const seasonalIdeas          = pending.seasonalIdeas || [];
+  const priceSuggestions       = pending.priceSuggestions || [];
+  const storefrontSuggestions  = pending.storefrontSuggestions || [];
+  const crmTasks               = pending.crmTasks || [];
+  const bookingProposals       = pending.bookingProposals || [];
+  const reorderTasks           = pending.reorderTasks || [];
+  const orderedReorders        = pending.orderedReorders || [];
 
-  const configuredCount = [state.shopifyConfigured, state.aiConfigured, state.instagramConfigured].filter(Boolean).length;
+  const marketingCount   = postDrafts.length + failedPosts.length + seasonalIdeas.length + storefrontSuggestions.length;
+  const vertriebCount    = crmTasks.length;
+  const shopCount        = lowStock.length + priceSuggestions.length + reorderTasks.length + orderedReorders.length;
+  const buchhaltungCount = bookingProposals.length;
+  const totalWaiting     = marketingCount + vertriebCount + shopCount + buchhaltungCount;
 
-  let headline, badgeKind, badgeText;
-  if (configuredCount === 0) {
-    headline = 'Bereit zum Start — verbinde deine ersten echten Dienste.';
-    badgeKind = 'gray'; badgeText = 'Einrichtung ausstehend';
-  } else if (failedPosts.length > 0) {
-    headline = `${failedPosts.length} Beitrag konnte nicht veröffentlicht werden.`;
+  // ── Ehrliche Gesamtaussage ──
+  let badgeKind = 'green', badgeText = 'Im grünen Bereich', headline = 'Alles erledigt — nichts wartet auf dich.';
+  if (failedPosts.length > 0) {
     badgeKind = 'red'; badgeText = 'Achtung nötig';
+    headline = `${failedPosts.length} Beitrag konnte nicht veröffentlicht werden.`;
   } else if (lowStock.some(p => p.urgency === 'ausverkauft')) {
-    headline = `${lowStock.filter(p => p.urgency === 'ausverkauft').length} Produkt ausverkauft.`;
     badgeKind = 'red'; badgeText = 'Bestand kritisch';
-  } else if (pendingPosts.length > 0 || lowStock.length > 0) {
-    headline = pendingPosts.length > 0
-      ? `${pendingPosts.length} Entwurf wartet auf deine Freigabe.`
-      : `${lowStock.length} Produkt mit niedrigem Bestand.`;
+    headline = `${lowStock.filter(p => p.urgency === 'ausverkauft').length} Produkt ausverkauft.`;
+  } else if (totalWaiting > 0) {
     badgeKind = 'amber'; badgeText = 'Wartet auf dich';
-  } else {
-    headline = 'Alles läuft reibungslos. Kein Handlungsbedarf.';
-    badgeKind = 'green'; badgeText = 'Im grünen Bereich';
+    headline = `${totalWaiting} ${totalWaiting === 1 ? 'Sache wartet' : 'Dinge warten'} auf deine Freigabe.`;
   }
 
-  const briefingHtml = state.aiConfigured ? `
-    <div class="glass fade-up" style="margin-bottom:14px; padding:16px; background:linear-gradient(135deg, rgba(255,159,10,.08), rgba(10,132,255,.08))">
-      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px">
-        <span style="font-size:18px">☀️</span>
-        <span style="font-weight:600; font-size:14px">Morgen-Briefing</span>
+  // ── Heutiger Fokus (Umsatz-Radar): das verkauft sich gerade wirklich ──
+  // Ein Streifen mit der Nummer-1-Empfehlung aus der Datenanalyse. Tippen
+  // führt ins Freigabe-Center, wo die passenden Vorschläge warten.
+  const top = radar && Array.isArray(radar.focus) && radar.focus.length ? radar.focus[0] : null;
+  const focusStripHtml = top ? `
+    <div class="section-h">Heutiger Fokus</div>
+    <button class="glass auto-strip" id="overviewToFocus">
+      <div class="auto-strip-main">🎯 <b>${escapeHtml(top.title || 'Produkt')}</b>${radar.source === 'sales' ? '' : ' <span class="badge badge-gray">Näherung</span>'}</div>
+      <div class="auto-strip-sub">
+        ${escapeHtml((top.reasons || []).slice(0, 2).join(' · '))}
+        ${radar.bestChannel ? ` · Stärkster Kanal: ${escapeHtml(radar.bestChannel.channel)}` : ''}
       </div>
-      ${briefing ? `
-        <div class="row-sub" style="margin-bottom:8px">Erstellt ${formatRelativeTime(briefing.created_at)}</div>
-        <div style="white-space:pre-wrap; line-height:1.5; font-size:14px">${escapeHtml(briefing.output)}</div>
-        <button class="btn btn-ghost" id="regenBriefing" style="margin-top:10px; font-size:13px">Neu erstellen</button>
-      ` : `
-        <div class="empty-sub" style="margin-bottom:10px">Noch kein Briefing vorhanden. Läuft automatisch jeden Morgen um 7:15 Uhr — oder jetzt manuell erstellen:</div>
-        <button class="btn btn-primary" id="regenBriefing">Briefing jetzt erstellen</button>
-      `}
-    </div>` : '';
+    </button>` : '';
 
-  const dailyReportHtml = state.aiConfigured ? `
-    <div class="section-h">Tages-Report</div>
-    <div class="glass" style="margin-bottom:14px; padding:14px">
-      ${dailyReport ? `
-        <div class="row-sub" style="margin-bottom:8px">Für ${formatDateDe(dailyReport.date)} · erstellt ${formatRelativeTime(dailyReport.created_at)}</div>
-        <div style="white-space:pre-wrap; line-height:1.5">${escapeHtml(dailyReport.output)}</div>
-        <button class="btn btn-ghost" id="regenReport" style="margin-top:10px; font-size:13px">Neu erstellen</button>
-      ` : `
-        <div class="empty-sub" style="margin-bottom:10px">Noch kein Report vorhanden. Läuft automatisch jeden Morgen um 7:30 Uhr — oder jetzt manuell erstellen:</div>
-        <button class="btn btn-primary" id="regenReport">Report jetzt erstellen</button>
-      `}
-    </div>` : '';
+  // ── Abteilungs-Kacheln: Zahl = "wartet auf dich", Tippen = dorthin, wo du handelst ──
+  // Die Karten kommen aus dem Server-Register (App-Plattform): eine neue
+  // Abteilung erscheint hier automatisch. Fallback = die bekannten vier.
+  let depts;
+  if (registry && Array.isArray(registry.departments) && registry.departments.length) {
+    depts = registry.departments.map(d => ({
+      icon: d.icon, title: d.title, n: d.pendingCount, tab: d.tab, focus: d.focus,
+      // Sonderfall: Buchhaltung ohne offene Buchungen zeigt die USt des
+      // Zeitraums (die Info hat die Übersicht ohnehin schon geladen).
+      hint: (d.id === 'buchhaltung' && d.pendingCount === 0 && ust && ust.zahllastAbs)
+        ? `USt ${ust.periodLabel}: ${ust.zahllastAbs}` : d.hint,
+    }));
+  } else {
+    depts = [
+      { icon: '🛍', title: 'Marketing & Social', n: marketingCount,
+        hint: marketingCount ? `${marketingCount} zur Freigabe` : 'Nichts offen',
+        tab: 'approvals', focus: '🛍' },
+      { icon: '✉️', title: 'Vertrieb & Kunden', n: vertriebCount,
+        hint: vertriebCount ? `${vertriebCount} Kunden-Mail(s) im Entwurf` : 'Keine offenen Mails',
+        tab: 'vertrieb' },
+      { icon: '📈', title: 'Shop & Umsatz', n: shopCount,
+        hint: shopCount ? `${shopCount}× Bestand / Preis / Einkauf` : 'Bestand ok',
+        tab: 'approvals', focus: '📈' },
+      { icon: '📒', title: 'Buchhaltung', n: buchhaltungCount,
+        hint: buchhaltungCount ? `${buchhaltungCount} Buchung(en) zu bestätigen`
+                               : (ust && ust.zahllastAbs ? `USt ${ust.periodLabel}: ${ust.zahllastAbs}` : 'Bereit'),
+        tab: 'buchhaltung' },
+    ];
+  }
 
-  const lowStockHtml = (state.shopifyConfigured && lowStock.length > 0) ? `
-    <div class="section-h">Lagerbestand-Warnungen</div>
-    <div class="glass" style="margin-bottom:14px">
-      ${lowStock.map(p => `
+  const deptGridHtml = `
+    <div class="section-h">Wartet auf dich</div>
+    <div class="dept-grid">
+      ${depts.map(d => `
+        <button class="dept-card glass" data-dept-tab="${d.tab}" data-dept-focus="${d.focus || ''}">
+          <div class="dept-card-top">
+            <span class="dept-card-icon">${d.icon}</span>
+            ${d.n == null ? `<span class="badge badge-gray">–</span>`
+              : d.n > 0 ? `<span class="badge badge-amber">${d.n}</span>`
+              : `<span class="badge badge-gray">ok</span>`}
+          </div>
+          <div class="dept-card-title">${escapeHtml(d.title)}</div>
+          <div class="dept-card-hint">${escapeHtml(d.hint)}</div>
+        </button>`).join('')}
+    </div>`;
+
+  // ── Finanz-Streifen (nur wenn es echte Buchungen gibt) ──
+  const hasBooks = bilanz && bilanz.summeAktivaCents > 0;
+  const hasUst = ust && ust.zahllastAbs != null;
+  const financeHtml = hasBooks ? `
+    <div class="section-h">Finanzen</div>
+    <div class="glass fin-strip">
+      <div class="fin-cell">
+        <div class="fin-num">${cockpit && cockpit.roi ? cockpit.roi.revenue.toFixed(0) + ' €' : '–'}</div>
+        <div class="fin-label">Umsatz 30 Tage</div>
+      </div>
+      <div class="fin-cell">
+        <div class="fin-num" style="color:${bilanz.jahresergebnisCents >= 0 ? 'var(--success)' : 'var(--danger)'}">${escapeHtml(bilanz.jahresergebnis)}</div>
+        <div class="fin-label">${bilanz.jahresergebnisCents >= 0 ? 'Gewinn (GuV)' : 'Verlust (GuV)'}</div>
+      </div>
+      <div class="fin-cell">
+        <div class="fin-num" style="color:${hasUst && ust.zahllastCents < 0 ? 'var(--success)' : 'var(--ink)'}">${hasUst ? escapeHtml(ust.zahllastAbs) : '–'}</div>
+        <div class="fin-label">${hasUst ? (ust.zahllastCents >= 0 ? 'USt-Zahllast' : 'USt-Erstattung') : 'USt'}</div>
+      </div>
+    </div>
+    <div class="row-sub" style="margin:8px 6px 0">Buchungs-Zahlen aus deinem Journal. USt-Zeitraum: ${hasUst ? escapeHtml(ust.periodLabel) : 'aktueller Monat'} · ersetzt keine Steuerberatung.</div>
+  ` : `
+    <div class="section-h">Finanzen</div>
+    <div class="glass" style="padding:18px">
+      <div class="row-sub">Noch keine Buchungen erfasst. Sobald Umsätze, Einkäufe oder Ausgaben gebucht sind, erscheinen hier GuV, Umsatz und USt auf einen Blick.</div>
+    </div>`;
+
+  // ── Missions-Log · Spur 1: was heute wirklich von selbst lief ──
+  // Quelle: activity_log-Einträge 'automation_run' (recordRun schreibt sie
+  // bei jedem echten Lauf). Endpunkt nicht erreichbar → Spur weglassen,
+  // nie etwas erfinden.
+  const todayRuns = (missions && Array.isArray(missions.todayRuns)) ? missions.todayRuns : null;
+  const todayHtml = todayRuns ? `
+    <div class="section-h">Heute automatisch gelaufen</div>
+    <div class="glass">
+      ${todayRuns.length ? todayRuns.map(r => `
         <div class="row">
-          <div class="row-icon" style="color:${p.urgency === 'ausverkauft' ? 'var(--danger)' : p.urgency === 'kritisch' ? 'var(--signal-amber)' : 'var(--ink-dim)'}">
-            ${p.urgency === 'ausverkauft' ? '✕' : '⚠'}
-          </div>
+          <div class="row-icon">${r.success ? '✓' : '⚠'}</div>
           <div class="row-text">
-            <div class="row-title">${escapeHtml(p.title)}</div>
-            <div class="row-sub">${p.urgency === 'ausverkauft' ? 'Ausverkauft' : `Noch ${p.inventoryQty} auf Lager`} · ${p.price != null ? p.price.toFixed(2) + ' €' : ''}</div>
+            <div class="row-title">${escapeHtml(r.detail || 'Automatik-Lauf')}</div>
+            <div class="row-sub">${formatRelativeTime(r.created_at)}</div>
           </div>
-          <span class="badge badge-${p.urgency === 'ausverkauft' ? 'red' : p.urgency === 'kritisch' ? 'amber' : 'gray'}">${escapeHtml(p.urgency)}</span>
-        </div>`).join('')}
+        </div>`).join('')
+      : `<div class="empty"><div class="empty-icon">⟳</div><div class="empty-title">Heute noch nichts von selbst gelaufen</div><div class="empty-sub">Sobald eine Automatik wirklich läuft, steht sie hier — echt protokolliert. Die Zeitpläne zeigt die Automatik-App.</div></div>`}
     </div>` : '';
+
+  // ── Missions-Log · Spur 3: zuletzt Erledigtes (ohne Automatik-Routine) ──
+  // Bevorzugt die gefilterte Erledigt-Spur; fällt der Missions-Endpunkt
+  // aus, bleibt das bisherige ungefilterte Protokoll als Fallback.
+  const doneEntries = (missions && Array.isArray(missions.done)) ? missions.done : (activity || []);
+  const activityHtml = `
+    <div class="section-h">Zuletzt erledigt</div>
+    <div class="glass">
+      ${doneEntries.length ? doneEntries.map(e => `
+        <div class="row">
+          <div class="row-icon">${e.success ? '✓' : '⚠'}</div>
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(formatActionLabel(e.action))}</div>
+            <div class="row-sub">${escapeHtml(e.detail || '')}${e.detail ? ' · ' : ''}${formatRelativeTime(e.created_at)}</div>
+          </div>
+        </div>`).join('')
+      : `<div class="empty"><div class="empty-icon">○</div><div class="empty-title">Noch nichts erledigt</div><div class="empty-sub">Sobald du etwas freigibst oder das System etwas für dich abschließt, erscheint es hier — echt protokolliert, nichts simuliert.</div></div>`}
+    </div>`;
 
   view.innerHTML = `
-    ${briefingHtml}
     <div class="vital-card glass fade-up">
       <div class="vital-top">
         <div>
-          <div class="vital-label">Status</div>
-          <div class="vital-headline">${headline}</div>
+          <div class="vital-label">System-Status</div>
+          <div class="vital-headline">${escapeHtml(headline)}</div>
         </div>
         <span class="badge badge-${badgeKind}">${badgeText}</span>
       </div>
       <div class="vital-metrics">
-        <div><div class="vital-metric-num">${configuredCount}/3</div><div class="vital-metric-label">Dienste live</div></div>
-        <div><div class="vital-metric-num">${publishedToday.length}</div><div class="vital-metric-label">Heute gepostet</div></div>
-        <div><div class="vital-metric-num">${history.length}</div><div class="vital-metric-label">KI-Texte erstellt</div></div>
+        <div><div class="vital-metric-num">${totalWaiting}</div><div class="vital-metric-label">Offen gesamt</div></div>
+        <div><div class="vital-metric-num">${vertriebCount}</div><div class="vital-metric-label">Kunden-Mails</div></div>
+        <div><div class="vital-metric-num">${buchhaltungCount}</div><div class="vital-metric-label">Buchungen</div></div>
       </div>
+      <button class="btn btn-primary btn-full" id="overviewToApprovals" style="margin-top:16px;font-size:13px">Zum Freigabe-Center</button>
     </div>
 
-    ${dailyReportHtml}
-    ${lowStockHtml}
+    ${focusStripHtml}
+    ${deptGridHtml}
+    ${automationOverviewStrip(automations)}
+    ${todayHtml}
+    ${financeHtml}
+    ${activityHtml}
 
-    <div class="grid2">
-      <div class="card glass fade-up" id="quickShopify">
-        <span class="card-icon">◫</span>
-        <div class="card-title">Shopify</div>
-        <div class="card-sub">${state.shopifyConfigured ? 'Verbunden' : 'Noch nicht verbunden'}</div>
-      </div>
-      <div class="card glass fade-up" id="quickAi">
-        <span class="card-icon">✦</span>
-        <div class="card-title">KI generieren</div>
-        <div class="card-sub">${state.aiConfigured ? 'Bereit' : 'API-Key fehlt'}</div>
-      </div>
-    </div>
-
-    <div class="section-h">Letzte Aktivität</div>
-    <div class="glass" id="activityList"></div>
+    <button class="btn btn-glass btn-full" id="overviewToDesktop" style="margin-top:16px;font-size:13px">⊞ Alle Apps</button>
   `;
 
-  document.getElementById('quickShopify').onclick = () => navigateTo('shopify');
-  document.getElementById('quickAi').onclick = () => navigateTo('ai');
-
-  const regenBtn = document.getElementById('regenReport');
-  if (regenBtn) {
-    regenBtn.onclick = async () => {
-      regenBtn.disabled = true;
-      regenBtn.textContent = 'Erstelle...';
-      try {
-        await api('/ai/daily-report/generate', { method: 'POST' });
-        await renderDashboard(view);
-      } catch (err) {
-        toast('Report konnte nicht erstellt werden', err.message, 'error');
-        regenBtn.disabled = false;
-        regenBtn.textContent = 'Erneut versuchen';
-      }
+  document.getElementById('overviewToApprovals').onclick = () => navigateTo('approvals');
+  document.getElementById('overviewToDesktop').onclick = () => navigateTo('desktop');
+  const toFocus = document.getElementById('overviewToFocus');
+  if (toFocus) toFocus.onclick = () => navigateTo('approvals');
+  const toAuto = document.getElementById('overviewToAutomations');
+  if (toAuto) toAuto.onclick = () => navigateTo('automations');
+  view.querySelectorAll('[data-dept-tab]').forEach(btn => {
+    btn.onclick = () => {
+      const focus = btn.dataset.deptFocus;
+      navigateTo(btn.dataset.deptTab, focus ? { focusCluster: focus } : {});
     };
-  }
-
-  const regenBriefingBtn = document.getElementById('regenBriefing');
-  if (regenBriefingBtn) {
-    regenBriefingBtn.onclick = async () => {
-      regenBriefingBtn.disabled = true;
-      regenBriefingBtn.textContent = 'Erstelle...';
-      try {
-        await api('/ai/briefing/generate', { method: 'POST' });
-        await renderDashboard(view);
-      } catch (err) {
-        toast('Briefing konnte nicht erstellt werden', err.message, 'error');
-        regenBriefingBtn.disabled = false;
-        regenBriefingBtn.textContent = 'Erneut versuchen';
-      }
-    };
-  }
-
-  loadActivityList();
-}
-
-async function loadActivityList() {
-  const el = document.getElementById('activityList');
-  if (!el) return;
-  try {
-    const log = await api('/settings/activity?limit=8');
-    if (log.length === 0) {
-      el.innerHTML = `<div class="empty"><div class="empty-icon">○</div><div class="empty-title">Noch keine Aktivität</div><div class="empty-sub">Sobald du etwas tust, erscheint es hier — echt protokolliert, nichts simuliert.</div></div>`;
-      return;
-    }
-    el.innerHTML = log.map(entry => `
-      <div class="row">
-        <div class="row-icon">${entry.success ? '✓' : '⚠'}</div>
-        <div class="row-text">
-          <div class="row-title">${escapeHtml(formatActionLabel(entry.action))}</div>
-          <div class="row-sub">${escapeHtml(entry.detail || '')} · ${formatRelativeTime(entry.created_at)}</div>
-        </div>
-      </div>`).join('');
-  } catch (err) {
-    el.innerHTML = `<div class="empty"><div class="empty-sub">${escapeHtml(err.message)}</div></div>`;
-  }
-}
-
-function formatActionLabel(action) {
-  const map = {
-    login_success: 'Erfolgreich angemeldet',
-    login_failed: 'Anmeldung fehlgeschlagen',
-    shopify_sync_products: 'Shopify-Produkte synchronisiert',
-    shopify_sync_orders: 'Shopify-Bestellungen synchronisiert',
-    ai_generate_product_description: 'Produktbeschreibung erstellt',
-    ai_generate_caption: 'Social-Caption erstellt',
-    ai_sales_analysis: 'Verkaufsanalyse erstellt',
-    ai_trend_research: 'Trend-Recherche durchgeführt',
-    instagram_post_published: 'Instagram-Beitrag veröffentlicht',
-    instagram_post_failed: 'Instagram-Beitrag fehlgeschlagen',
-    post_draft_created: 'Entwurf erstellt',
-    permission_changed: 'Berechtigung geändert',
-    owner_password_changed: 'Passwort geändert',
-    low_stock_alert: '⚠ Lagerbestand-Warnung',
-    backup_completed: 'Backup erstellt',
-    health_check_warning: '⚠ System-Gesundheitswarnung',
-  };
-  return map[action] || action;
-}
-
-function formatRelativeTime(iso) {
-  const diffMs = Date.now() - new Date(iso.replace(' ', 'T') + 'Z').getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'gerade jetzt';
-  if (mins < 60) return `vor ${mins} Min.`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `vor ${hours} Std.`;
-  return `vor ${Math.floor(hours / 24)} Tg.`;
-}
-
-function formatDateDe(dateStr) {
-  // dateStr im Format YYYY-MM-DD
-  const [y, m, d] = dateStr.split('-');
-  return `${d}.${m}.${y}`;
+  });
 }
